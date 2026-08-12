@@ -98,10 +98,14 @@ export function Stats(_props: StatsProps) {
   const { t } = useTranslation()
 
   const stats: StatItem[] = [
-    { end: 50, suffix: '+', label: t('upstream services integrated') },
-    { end: 100, suffix: '+', label: t('model billing support') },
-    { end: 50, suffix: '+', label: t('compatible API routes') },
-    { end: 10, suffix: '+', label: t('scheduling controls') },
+    // 真实值，随渠道/模型/分组倍率变动需同步更新。
+    // 2026-08-12 校准：3 条上游线路(claude MAX / Codex PRO / 超级稳定claude)、
+    // 11 个可用模型(Claude 8 + GPT-5.6 3)、2 种协议(OpenAI / Anthropic)、
+    // 分组倍率 0.1x(超级稳定线 0.25x)。
+    { end: 3, suffix: '', label: t('upstream services integrated') },
+    { end: 11, suffix: '', label: t('model billing support') },
+    { end: 2, suffix: '', label: t('compatible API routes') },
+    { end: 0.1, suffix: '×', decimals: 1, label: t('scheduling controls') },
   ]
 
   return (

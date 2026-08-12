@@ -49,7 +49,14 @@ export function Features(_props: FeaturesProps) {
       icon: <Zap className='size-4 text-blue-400' />,
       visual: (
         <div className='mt-4 grid grid-cols-3 gap-2'>
-          {['OpenAI', 'Claude', 'Gemini', 'DeepSeek', 'Qwen', 'Llama'].map(
+          {[
+            'Opus 5',
+            'Fable 5',
+            'Sonnet 5',
+            'Haiku 4.5',
+            'GPT-5.6',
+            'Codex',
+          ].map(
             (name) => (
               <div
                 key={name}
