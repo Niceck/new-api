@@ -64,6 +64,7 @@ import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
+import { getLogGroupRatio } from '../../lib/billing-ratio'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -216,7 +217,7 @@ function quotaSaturationKindLabel(
   return t('Invalid (NaN)')
 }
 
-function BillingBreakdown(props: {
+export function BillingBreakdown(props: {
   log: UsageLog
   other: LogOtherData
   isAdmin: boolean
@@ -230,7 +231,11 @@ function BillingBreakdown(props: {
 
   const rows: Array<{ label: string; value: string }> = []
   const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
-  const fmtPrice = (usd: number) => formatBillingCurrencyFromUSD(usd, priceOpts)
+  // Every price below is a unit price the user actually paid, so it carries the
+  // group ratio the backend already applied when this log was settled.
+  const groupRatio = getLogGroupRatio(other)
+  const fmtPrice = (usd: number) =>
+    formatBillingCurrencyFromUSD(usd * groupRatio.multiplier, priceOpts)
   const baseInputUSD = other.model_ratio != null ? other.model_ratio * 2.0 : 0
 
   if (isTieredExpr) {
@@ -281,13 +286,12 @@ function BillingBreakdown(props: {
     }
   }
 
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
-  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
+  if (groupRatio.ratio != null) {
     rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
+      label: groupRatio.isUserExclusive
+        ? t('User Exclusive Ratio (included)')
+        : t('Group Ratio (included)'),
+      value: `${formatRatio(groupRatio.ratio)}x`,
     })
   }
 

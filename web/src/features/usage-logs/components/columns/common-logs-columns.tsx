@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
+import { getLogGroupRatio } from '../../lib/billing-ratio'
 import {
   formatModelName,
   getTieredBillingSummary,
@@ -151,10 +152,13 @@ function buildTypeDetailSegments(
   const segments: DetailSegment[] = []
 
   const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
+  // Unit prices in the row summary are what the user paid, so they carry the
+  // group ratio the backend already applied when this log was settled.
+  const grMultiplier = getLogGroupRatio(other).multiplier
   const formatPrice = (price: number) =>
-    `${formatBillingCurrencyFromUSD(price, priceOpts)}/M`
+    `${formatBillingCurrencyFromUSD(price * grMultiplier, priceOpts)}/M`
   const formatPriceCompact = (price: number) =>
-    formatBillingCurrencyFromUSD(price, priceOpts)
+    formatBillingCurrencyFromUSD(price * grMultiplier, priceOpts)
   const formatPriceList = (prices: string[], showUnit: boolean) => {
     const text = prices.join(' / ')
     return showUnit ? `${text}/M` : text
@@ -218,7 +222,7 @@ function buildTypeDetailSegments(
     const isPerCall = isPerCallBilling(modelPrice)
     if (isPerCall && modelPrice != null) {
       segments.push({
-        text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(modelPrice, priceOpts)}`,
+        text: `${t('Per-call')} · ${formatPriceCompact(modelPrice)}`,
       })
     } else if (other.model_ratio != null) {
       const inputPriceUSD = other.model_ratio * 2.0
@@ -254,20 +258,14 @@ function buildTypeDetailSegments(
         }
       }
     } else {
-      const userGroupRatio = other.user_group_ratio
-      const groupRatio = other.group_ratio
-      const isUserGroup =
-        userGroupRatio != null &&
-        Number.isFinite(userGroupRatio) &&
-        userGroupRatio !== -1
-      const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
-      const ratioLabel = isUserGroup
+      const { ratio, isUserExclusive } = getLogGroupRatio(other)
+      const ratioLabel = isUserExclusive
         ? t('User Exclusive Ratio')
         : t('Group Ratio')
 
-      if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
+      if (ratio != null) {
         segments.push({
-          text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
+          text: `${ratioLabel} ${formatRatioCompact(ratio)}x`,
         })
       }
     }
