@@ -107,3 +107,29 @@ export function replaceModelInPath(path: string, modelName: string): string {
 export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
 }
+
+/**
+ * Resolve which group badge to display on the model card.
+ *
+ * When a specific group is selected and the model belongs to that group,
+ * show that group. Otherwise, fall back to the first group in the list
+ * (which typically represents the default/lowest-price group).
+ */
+export function getDisplayGroupForBadge(
+  groups: string[],
+  selectedGroup?: string
+): string | undefined {
+  if (groups.length === 0) {
+    return undefined
+  }
+
+  if (
+    selectedGroup &&
+    selectedGroup !== FILTER_ALL &&
+    groups.includes(selectedGroup)
+  ) {
+    return selectedGroup
+  }
+
+  return groups[0]
+}
