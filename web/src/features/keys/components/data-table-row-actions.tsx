@@ -253,17 +253,12 @@ export function DataTableRowActions<TData>({
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={async () => {
-            const realKey = getCachedRealKey()
-            if (!realKey) return
-            const connStr = encodeChannelConnectionInfo(
-              realKey,
-              getServerAddress()
-            )
-            const ok = await copyToClipboard(connStr)
+            const serverUrl = getServerAddress()
+            const ok = await copyToClipboard(serverUrl)
             if (ok) toast.success(t('Copied'))
           }}
         >
-          {t('Copy Connection Info')}
+          {t('Copy Server URL')}
           <DropdownMenuShortcut>
             <Link size={16} />
           </DropdownMenuShortcut>
