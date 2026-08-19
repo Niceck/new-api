@@ -23,7 +23,8 @@ import (
 //   - The content probe matches `"content":"` and `"content": "` (compact and
 //     python-style spacing, the only forms real serializers emit); other legal
 //     spacings skip normalization and simply keep the pre-repair behavior.
-//   - A body is only rewritten when at least one block is dropped. The rewrite
+//   - A body is only rewritten when at least one repair (drop or normalize)
+//     is applied. The rewrite
 //     re-encodes the top level and the touched messages: object keys sort, JSON
 //     whitespace between tokens compacts, and <, >, & inside strings become
 //     <-style escapes — the same encoding the non-pass-through path has
@@ -61,12 +62,14 @@ func sanitizeClaudePassThroughBody(storage common.BodyStorage) ([]byte, int, int
 	return sanitized, dropped, normalized, nil
 }
 
-// sanitizeClaudeThinkingBlocks drops content blocks of type "thinking" whose
-// "thinking" field is missing, null, non-string or empty, and blocks of type
-// "redacted_thinking" with the same defect on "data". A message whose content
-// would become empty keeps a minimal text placeholder so role alternation
-// survives. Anything that fails to parse is returned verbatim: the sanitizer
-// must never become a failure point itself (fail-open).
+// sanitizeClaudeMessages repairs the messages array: it drops content blocks
+// of type "thinking" whose "thinking" field is missing, null, non-string or
+// empty (and "redacted_thinking" with the same defect on "data"), and
+// normalizes string-form message contents into the canonical single text
+// block array. A message whose content would become empty keeps a minimal
+// text placeholder so role alternation survives. Anything that fails to parse
+// is returned verbatim: the sanitizer must never become a failure point
+// itself (fail-open).
 //
 // When nothing is repaired the input bytes are returned as-is. On a repair,
 // untouched fields travel as json.RawMessage so their values (numbers, unknown
