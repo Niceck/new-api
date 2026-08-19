@@ -190,7 +190,7 @@ func TestSanitizeClaudeThinkingBlocksOversizedBodyFailOpen(t *testing.T) {
 	if repaired != 0 {
 		t.Fatalf("repaired = %d, want 0 (oversized body must fail open)", repaired)
 	}
-	if len(got) != len(body) {
+	if string(got) != body {
 		t.Fatalf("oversized body must be returned verbatim")
 	}
 }

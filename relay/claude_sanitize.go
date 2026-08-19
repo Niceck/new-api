@@ -60,9 +60,11 @@ func sanitizeClaudePassThroughBody(storage common.BodyStorage) ([]byte, int, err
 // survives. Anything that fails to parse is returned verbatim: the sanitizer
 // must never become a failure point itself (fail-open).
 //
-// Untouched values are carried as json.RawMessage, so every byte outside the
-// repaired messages (numbers, ordering inside blocks, unknown fields) is
-// preserved exactly; only object key order at the rewritten levels may change.
+// When nothing is repaired the input bytes are returned as-is. On a repair,
+// untouched fields travel as json.RawMessage so their values (numbers, unknown
+// fields, block interiors) survive semantically intact — but the top level and
+// the touched messages are re-encoded: key order, inter-token whitespace and
+// escape forms may change (accepted behavior, see the file header).
 func sanitizeClaudeThinkingBlocks(body []byte) ([]byte, int) {
 	if len(body) > maxSanitizeBodySize {
 		return body, 0
