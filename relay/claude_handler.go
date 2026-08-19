@@ -164,7 +164,20 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.NewReplayableBodyReader(storage)
+		sanitized, repaired, sanitizeErr := sanitizeClaudePassThroughBody(storage)
+		if sanitizeErr != nil || repaired == 0 {
+			// fail-open: forward the stored body untouched
+			requestBody = common.NewReplayableBodyReader(storage)
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("pass-through body sanitized: dropped %d invalid thinking block(s)", repaired))
+			body, closer, err := relaycommon.NewOutboundJSONBody(sanitized)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			defer closer.Close()
+			sanitized = nil
+			requestBody = body
+		}
 	} else {
 		convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)
 		if err != nil {
