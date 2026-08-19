@@ -165,18 +165,20 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		sanitized, repaired, sanitizeErr := sanitizeClaudePassThroughBody(storage)
-		if sanitizeErr != nil || repaired == 0 {
-			// fail-open: forward the stored body untouched
-			requestBody = common.NewReplayableBodyReader(storage)
-		} else {
-			logger.LogInfo(c, fmt.Sprintf("pass-through body sanitized: dropped %d invalid thinking block(s)", repaired))
-			body, closer, err := relaycommon.NewOutboundJSONBody(sanitized)
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		if sanitizeErr == nil && repaired > 0 {
+			if body, closer, err := relaycommon.NewOutboundJSONBody(sanitized); err == nil {
+				logger.LogInfo(c, fmt.Sprintf("pass-through body sanitized: dropped %d invalid thinking block(s)", repaired))
+				defer closer.Close()
+				requestBody = body
+			} else {
+				// fail-open contract: a sanitizer-side failure must never block
+				// the request — fall back to the stored original body.
+				logger.LogWarn(c, fmt.Sprintf("pass-through sanitize rebuild failed, forwarding original body: %s", err.Error()))
 			}
-			defer closer.Close()
-			sanitized = nil
-			requestBody = body
+		}
+		if requestBody == nil {
+			// no repair needed, or any sanitize failure: forward untouched
+			requestBody = common.NewReplayableBodyReader(storage)
 		}
 	} else {
 		convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)

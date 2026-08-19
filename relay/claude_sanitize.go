@@ -13,6 +13,24 @@ import (
 // Anthropic's schema validation with "each thinking block must contain
 // thinking". Dropping just those blocks keeps the rest of the conversation
 // intact and lets the request through.
+//
+// Known, accepted boundaries (codex dual-round audit 2026-08-19):
+//   - A body is only rewritten when at least one block is dropped. The rewrite
+//     re-encodes the top level and the touched messages: object keys sort, JSON
+//     whitespace between tokens compacts, and <, >, & inside strings become
+//     <-style escapes — the same encoding the non-pass-through path has
+//     always produced; semantics are unchanged.
+//   - Duplicate JSON keys collapse to their last value on a rewrite (Go map
+//     semantics, matching most upstream parsers). Real SDKs never emit them.
+//   - The `"thinking"` byte probe can be dodged with \u-escaped key names;
+//     such hand-crafted bodies skip sanitizing and simply keep today's 400 —
+//     nobody gains anything, so the cheap probe stays.
+//   - Only messages[].content[] top-level blocks are inspected; interiors of
+//     tool_result etc. are deliberately not recursed into (different upstream
+//     error class, and recursing risks eating valid nested content).
+//   - The "…" placeholder left in a fully-emptied message is model-visible by
+//     design: that turn was already damaged, and a one-glyph text is the
+//     cheapest way to keep the message and role alternation valid.
 
 // maxSanitizeBodySize caps the bodies the sanitizer is willing to parse.
 // Parsing keeps a RawMessage view (~2x body) resident, so bigger requests are
@@ -46,11 +64,14 @@ func sanitizeClaudePassThroughBody(storage common.BodyStorage) ([]byte, int, err
 // repaired messages (numbers, ordering inside blocks, unknown fields) is
 // preserved exactly; only object key order at the rewritten levels may change.
 func sanitizeClaudeThinkingBlocks(body []byte) ([]byte, int) {
+	if len(body) > maxSanitizeBodySize {
+		return body, 0
+	}
 	if !bytes.Contains(body, []byte(`"thinking"`)) && !bytes.Contains(body, []byte(`"redacted_thinking"`)) {
 		return body, 0
 	}
 	var root map[string]json.RawMessage
-	if err := json.Unmarshal(body, &root); err != nil {
+	if err := common.Unmarshal(body, &root); err != nil {
 		return body, 0
 	}
 	rawMessages, ok := root["messages"]
@@ -58,7 +79,7 @@ func sanitizeClaudeThinkingBlocks(body []byte) ([]byte, int) {
 		return body, 0
 	}
 	var messages []json.RawMessage
-	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+	if err := common.Unmarshal(rawMessages, &messages); err != nil {
 		return body, 0
 	}
 
@@ -75,12 +96,12 @@ func sanitizeClaudeThinkingBlocks(body []byte) ([]byte, int) {
 		return body, 0
 	}
 
-	newMessages, err := json.Marshal(messages)
+	newMessages, err := common.Marshal(messages)
 	if err != nil {
 		return body, 0
 	}
 	root["messages"] = newMessages
-	newBody, err := json.Marshal(root)
+	newBody, err := common.Marshal(root)
 	if err != nil {
 		return body, 0
 	}
@@ -92,7 +113,7 @@ func sanitizeClaudeThinkingBlocks(body []byte) ([]byte, int) {
 // unparsable messages are returned unchanged.
 func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int) {
 	var msg map[string]json.RawMessage
-	if err := json.Unmarshal(rawMsg, &msg); err != nil {
+	if err := common.Unmarshal(rawMsg, &msg); err != nil {
 		return rawMsg, 0
 	}
 	rawContent, ok := msg["content"]
@@ -100,7 +121,7 @@ func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int)
 		return rawMsg, 0
 	}
 	var blocks []json.RawMessage
-	if err := json.Unmarshal(rawContent, &blocks); err != nil {
+	if err := common.Unmarshal(rawContent, &blocks); err != nil {
 		return rawMsg, 0
 	}
 
@@ -121,12 +142,12 @@ func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int)
 		kept = append(kept, json.RawMessage(`{"type":"text","text":"…"}`))
 	}
 
-	newContent, err := json.Marshal(kept)
+	newContent, err := common.Marshal(kept)
 	if err != nil {
 		return rawMsg, 0
 	}
 	msg["content"] = newContent
-	newMsg, err := json.Marshal(msg)
+	newMsg, err := common.Marshal(msg)
 	if err != nil {
 		return rawMsg, 0
 	}
@@ -142,7 +163,7 @@ func isInvalidThinkingBlock(rawBlock json.RawMessage) bool {
 		Thinking json.RawMessage `json:"thinking"`
 		Data     json.RawMessage `json:"data"`
 	}
-	if err := json.Unmarshal(rawBlock, &block); err != nil {
+	if err := common.Unmarshal(rawBlock, &block); err != nil {
 		return false
 	}
 	switch block.Type {
@@ -162,7 +183,7 @@ func isNonEmptyJSONString(raw json.RawMessage) bool {
 		return false
 	}
 	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
+	if err := common.Unmarshal(raw, &s); err != nil {
 		return false
 	}
 	return s != ""
