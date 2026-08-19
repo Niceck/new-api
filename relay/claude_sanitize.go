@@ -14,6 +14,14 @@ import (
 // thinking". Dropping just those blocks keeps the rest of the conversation
 // intact and lets the request through.
 
+// maxSanitizeBodySize caps the bodies the sanitizer is willing to parse.
+// Parsing keeps a RawMessage view (~2x body) resident, so bigger requests are
+// forwarded untouched instead — the pre-repair behavior, still fail-open
+// (codex audit P1-4). Real thinking conversations sit far below this: 200k
+// tokens of context is under 4MB of JSON; only heavy base64 attachments
+// approach the request cap.
+const maxSanitizeBodySize = 32 << 20
+
 // sanitizeClaudePassThroughBody reads the stored pass-through body and strips
 // invalid thinking blocks. It returns the sanitized body and how many blocks
 // were repaired; repaired == 0 means the body must be forwarded from storage

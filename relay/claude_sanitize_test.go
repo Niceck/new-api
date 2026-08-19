@@ -179,3 +179,33 @@ func TestSanitizeClaudeThinkingBlocksPreservesSurroundingBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeClaudeThinkingBlocksOversizedBodyFailOpen(t *testing.T) {
+	// Bodies beyond maxSanitizeBodySize must be forwarded untouched even when
+	// they contain repairable blocks: the sanitizer must not multiply the
+	// resident memory of huge requests (codex audit P1-4).
+	padding := strings.Repeat("x", maxSanitizeBodySize)
+	body := `{"pad":"` + padding + `","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"text","text":"a"}]}]}`
+	got, repaired := sanitizeClaudeThinkingBlocks([]byte(body))
+	if repaired != 0 {
+		t.Fatalf("repaired = %d, want 0 (oversized body must fail open)", repaired)
+	}
+	if len(got) != len(body) {
+		t.Fatalf("oversized body must be returned verbatim")
+	}
+}
+
+func TestSanitizeClaudeThinkingBlocksToolResultNotRecursed(t *testing.T) {
+	// Deliberately non-recursive: only messages[].content[] top-level blocks
+	// are inspected. A thinking-shaped block nested inside tool_result.content
+	// is left for the upstream to judge (it is not the schema error this
+	// sanitizer repairs), so a body whose only defect sits there is untouched.
+	body := `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"thinking","thinking":""}]}]}]}`
+	got, repaired := sanitizeClaudeThinkingBlocks([]byte(body))
+	if repaired != 0 {
+		t.Fatalf("repaired = %d, want 0 (tool_result interiors are out of scope)", repaired)
+	}
+	if string(got) != body {
+		t.Fatalf("body with only nested defects must be returned verbatim:\n%s", got)
+	}
+}
