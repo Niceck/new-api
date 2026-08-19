@@ -40,17 +40,17 @@ import (
 // approach the request cap.
 const maxSanitizeBodySize = 32 << 20
 
-// sanitizeClaudePassThroughBody reads the stored pass-through body and strips
-// invalid thinking blocks. It returns the sanitized body and how many blocks
-// were repaired; repaired == 0 means the body must be forwarded from storage
-// untouched.
-func sanitizeClaudePassThroughBody(storage common.BodyStorage) ([]byte, int, error) {
+// sanitizeClaudePassThroughBody reads the stored pass-through body and repairs
+// it. It returns the sanitized body plus how many invalid thinking blocks were
+// dropped and how many string-form contents were normalized; both zero means
+// the body must be forwarded from storage untouched.
+func sanitizeClaudePassThroughBody(storage common.BodyStorage) ([]byte, int, int, error) {
 	raw, err := storage.Bytes()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	sanitized, repaired := sanitizeClaudeThinkingBlocks(raw)
-	return sanitized, repaired, nil
+	sanitized, dropped, normalized := sanitizeClaudeMessages(raw)
+	return sanitized, dropped, normalized, nil
 }
 
 // sanitizeClaudeThinkingBlocks drops content blocks of type "thinking" whose
@@ -65,66 +65,67 @@ func sanitizeClaudePassThroughBody(storage common.BodyStorage) ([]byte, int, err
 // fields, block interiors) survive semantically intact — but the top level and
 // the touched messages are re-encoded: key order, inter-token whitespace and
 // escape forms may change (accepted behavior, see the file header).
-func sanitizeClaudeThinkingBlocks(body []byte) ([]byte, int) {
+func sanitizeClaudeMessages(body []byte) ([]byte, int, int) {
 	if len(body) > maxSanitizeBodySize {
-		return body, 0
+		return body, 0, 0
 	}
 	if !bytes.Contains(body, []byte(`"thinking"`)) && !bytes.Contains(body, []byte(`"redacted_thinking"`)) {
-		return body, 0
+		return body, 0, 0
 	}
 	var root map[string]json.RawMessage
 	if err := common.Unmarshal(body, &root); err != nil {
-		return body, 0
+		return body, 0, 0
 	}
 	rawMessages, ok := root["messages"]
 	if !ok {
-		return body, 0
+		return body, 0, 0
 	}
 	var messages []json.RawMessage
 	if err := common.Unmarshal(rawMessages, &messages); err != nil {
-		return body, 0
+		return body, 0, 0
 	}
 
-	repaired := 0
+	dropped, normalized := 0, 0
 	for i, rawMsg := range messages {
-		newMsg, dropped := sanitizeClaudeMessageContent(rawMsg)
-		if dropped == 0 {
+		newMsg, d, n := sanitizeClaudeMessageContent(rawMsg)
+		if d+n == 0 {
 			continue
 		}
-		repaired += dropped
+		dropped += d
+		normalized += n
 		messages[i] = newMsg
 	}
-	if repaired == 0 {
-		return body, 0
+	if dropped+normalized == 0 {
+		return body, 0, 0
 	}
 
 	newMessages, err := common.Marshal(messages)
 	if err != nil {
-		return body, 0
+		return body, 0, 0
 	}
 	root["messages"] = newMessages
 	newBody, err := common.Marshal(root)
 	if err != nil {
-		return body, 0
+		return body, 0, 0
 	}
-	return newBody, repaired
+	return newBody, dropped, normalized
 }
 
 // sanitizeClaudeMessageContent returns the message with invalid thinking
-// blocks removed and the number of blocks dropped. String-form contents and
-// unparsable messages are returned unchanged.
-func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int) {
+// blocks removed and/or its string-form content normalized, plus the count of
+// each repair. Unparsable messages are returned unchanged.
+func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int, int) {
 	var msg map[string]json.RawMessage
 	if err := common.Unmarshal(rawMsg, &msg); err != nil {
-		return rawMsg, 0
+		return rawMsg, 0, 0
 	}
 	rawContent, ok := msg["content"]
 	if !ok {
-		return rawMsg, 0
+		return rawMsg, 0, 0
 	}
 	var blocks []json.RawMessage
 	if err := common.Unmarshal(rawContent, &blocks); err != nil {
-		return rawMsg, 0
+		return rawMsg, 0, 0
 	}
 
 	kept := make([]json.RawMessage, 0, len(blocks))
@@ -136,7 +137,7 @@ func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int)
 	}
 	dropped := len(blocks) - len(kept)
 	if dropped == 0 {
-		return rawMsg, 0
+		return rawMsg, 0, 0
 	}
 	if len(kept) == 0 {
 		// An empty content array is itself rejected upstream; keep a minimal
@@ -146,14 +147,14 @@ func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int)
 
 	newContent, err := common.Marshal(kept)
 	if err != nil {
-		return rawMsg, 0
+		return rawMsg, 0, 0
 	}
 	msg["content"] = newContent
 	newMsg, err := common.Marshal(msg)
 	if err != nil {
-		return rawMsg, 0
+		return rawMsg, 0, 0
 	}
-	return newMsg, dropped
+	return newMsg, dropped, 0
 }
 
 // isInvalidThinkingBlock reports whether the block is a thinking-family block

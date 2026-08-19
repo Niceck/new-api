@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestSanitizeClaudeThinkingBlocksUntouched(t *testing.T) {
+func TestSanitizeClaudeMessagesUntouched(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -46,9 +46,9 @@ func TestSanitizeClaudeThinkingBlocksUntouched(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, repaired := sanitizeClaudeThinkingBlocks([]byte(tc.body))
-			if repaired != 0 {
-				t.Fatalf("repaired = %d, want 0", repaired)
+			got, dropped, normalized := sanitizeClaudeMessages([]byte(tc.body))
+			if dropped != 0 || normalized != 0 {
+				t.Fatalf("dropped = %d, normalized = %d, want 0/0", dropped, normalized)
 			}
 			if string(got) != tc.body {
 				t.Fatalf("body changed:\n got: %s\nwant: %s", got, tc.body)
@@ -57,7 +57,7 @@ func TestSanitizeClaudeThinkingBlocksUntouched(t *testing.T) {
 	}
 }
 
-func TestSanitizeClaudeThinkingBlocksDropsInvalid(t *testing.T) {
+func TestSanitizeClaudeMessagesDropsInvalid(t *testing.T) {
 	cases := []struct {
 		name         string
 		body         string
@@ -117,9 +117,9 @@ func TestSanitizeClaudeThinkingBlocksDropsInvalid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, repaired := sanitizeClaudeThinkingBlocks([]byte(tc.body))
-			if repaired != tc.wantRepaired {
-				t.Fatalf("repaired = %d, want %d\nbody: %s", repaired, tc.wantRepaired, got)
+			got, dropped, normalized := sanitizeClaudeMessages([]byte(tc.body))
+			if dropped != tc.wantRepaired || normalized != 0 {
+				t.Fatalf("dropped = %d (want %d), normalized = %d (want 0)\nbody: %s", dropped, tc.wantRepaired, normalized, got)
 			}
 			for _, s := range tc.wantGone {
 				if strings.Contains(string(got), s) {
@@ -138,11 +138,11 @@ func TestSanitizeClaudeThinkingBlocksDropsInvalid(t *testing.T) {
 	}
 }
 
-func TestSanitizeClaudeThinkingBlocksPlaceholderOnEmptiedMessage(t *testing.T) {
+func TestSanitizeClaudeMessagesPlaceholderOnEmptiedMessage(t *testing.T) {
 	body := `{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":""}]},{"role":"user","content":[{"type":"text","text":"next"}]}]}`
-	got, repaired := sanitizeClaudeThinkingBlocks([]byte(body))
-	if repaired != 1 {
-		t.Fatalf("repaired = %d, want 1", repaired)
+	got, dropped, normalized := sanitizeClaudeMessages([]byte(body))
+	if dropped != 1 || normalized != 0 {
+		t.Fatalf("dropped = %d, normalized = %d, want 1/0", dropped, normalized)
 	}
 	var parsed struct {
 		Messages []struct {
@@ -165,13 +165,13 @@ func TestSanitizeClaudeThinkingBlocksPlaceholderOnEmptiedMessage(t *testing.T) {
 	}
 }
 
-func TestSanitizeClaudeThinkingBlocksPreservesSurroundingBytes(t *testing.T) {
+func TestSanitizeClaudeMessagesPreservesSurroundingBytes(t *testing.T) {
 	// Large integer and unknown fields must survive byte-exact even when a
 	// sibling message is rewritten (raw-message surgery, no float64 round-trip).
 	body := `{"model":"claude-opus-5","big_id":9007199254740993,"metadata":{"user_id":"u-1"},"messages":[{"role":"user","content":[{"type":"text","text":"q"}],"x_custom":{"n":123456789012345678}},{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"text","text":"a"}]}]}`
-	got, repaired := sanitizeClaudeThinkingBlocks([]byte(body))
-	if repaired != 1 {
-		t.Fatalf("repaired = %d, want 1", repaired)
+	got, dropped, normalized := sanitizeClaudeMessages([]byte(body))
+	if dropped != 1 || normalized != 0 {
+		t.Fatalf("dropped = %d, normalized = %d, want 1/0", dropped, normalized)
 	}
 	for _, s := range []string{"9007199254740993", "123456789012345678", `"metadata":{"user_id":"u-1"}`, `"x_custom":{"n":123456789012345678}`} {
 		if !strings.Contains(string(got), s) {
@@ -180,32 +180,137 @@ func TestSanitizeClaudeThinkingBlocksPreservesSurroundingBytes(t *testing.T) {
 	}
 }
 
-func TestSanitizeClaudeThinkingBlocksOversizedBodyFailOpen(t *testing.T) {
+func TestSanitizeClaudeMessagesOversizedBodyFailOpen(t *testing.T) {
 	// Bodies beyond maxSanitizeBodySize must be forwarded untouched even when
 	// they contain repairable blocks: the sanitizer must not multiply the
 	// resident memory of huge requests (codex audit P1-4).
 	padding := strings.Repeat("x", maxSanitizeBodySize)
 	body := `{"pad":"` + padding + `","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"text","text":"a"}]}]}`
-	got, repaired := sanitizeClaudeThinkingBlocks([]byte(body))
-	if repaired != 0 {
-		t.Fatalf("repaired = %d, want 0 (oversized body must fail open)", repaired)
+	got, dropped, normalized := sanitizeClaudeMessages([]byte(body))
+	if dropped != 0 || normalized != 0 {
+		t.Fatalf("dropped = %d, normalized = %d, want 0/0 (oversized body must fail open)", dropped, normalized)
 	}
 	if string(got) != body {
 		t.Fatalf("oversized body must be returned verbatim")
 	}
 }
 
-func TestSanitizeClaudeThinkingBlocksToolResultNotRecursed(t *testing.T) {
+func TestSanitizeClaudeMessagesToolResultNotRecursed(t *testing.T) {
 	// Deliberately non-recursive: only messages[].content[] top-level blocks
 	// are inspected. A thinking-shaped block nested inside tool_result.content
 	// is left for the upstream to judge (it is not the schema error this
 	// sanitizer repairs), so a body whose only defect sits there is untouched.
 	body := `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"thinking","thinking":""}]}]}]}`
-	got, repaired := sanitizeClaudeThinkingBlocks([]byte(body))
-	if repaired != 0 {
-		t.Fatalf("repaired = %d, want 0 (tool_result interiors are out of scope)", repaired)
+	got, dropped, normalized := sanitizeClaudeMessages([]byte(body))
+	if dropped != 0 || normalized != 0 {
+		t.Fatalf("dropped = %d, normalized = %d, want 0/0 (tool_result interiors are out of scope)", dropped, normalized)
 	}
 	if string(got) != body {
 		t.Fatalf("body with only nested defects must be returned verbatim:\n%s", got)
+	}
+}
+
+func TestSanitizeClaudeMessagesNormalizesStringContent(t *testing.T) {
+	// Anthropic's API accepts `content` as a plain string (shorthand for one
+	// text block), but the freemodel upstreams reject it since 08-18 with
+	// "content: Input should be a valid array". Normalizing to the canonical
+	// array form is lossless and keeps such legal requests working.
+	cases := []struct {
+		name     string
+		body     string
+		wantText string
+	}{
+		{
+			name:     "plain string content",
+			body:     `{"model":"claude-opus-5","messages":[{"role":"user","content":"hello world"}]}`,
+			wantText: "hello world",
+		},
+		{
+			name:     "python-style spaced serialization",
+			body:     `{"model": "claude-opus-5", "messages": [{"role": "user", "content": "hi"}]}`,
+			wantText: "hi",
+		},
+		{
+			name:     "unicode and escapes survive",
+			body:     `{"messages":[{"role":"user","content":"你好\n<b>&amp;"}]}`,
+			wantText: "你好\n<b>&amp;",
+		},
+		{
+			name:     "string content mentioning thinking normalizes without drops",
+			body:     `{"messages":[{"role":"user","content":"tell me about \"thinking\" blocks"}]}`,
+			wantText: `tell me about "thinking" blocks`,
+		},
+		{
+			name:     "empty string content still normalized",
+			body:     `{"messages":[{"role":"assistant","content":""}]}`,
+			wantText: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, dropped, normalized := sanitizeClaudeMessages([]byte(tc.body))
+			if dropped != 0 || normalized != 1 {
+				t.Fatalf("dropped = %d, normalized = %d, want 0/1\nbody: %s", dropped, normalized, got)
+			}
+			var parsed struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(got, &parsed); err != nil {
+				t.Fatalf("unmarshal normalized body: %v", err)
+			}
+			if len(parsed.Messages) != 1 || len(parsed.Messages[0].Content) != 1 {
+				t.Fatalf("want exactly one message with one block, got: %s", got)
+			}
+			block := parsed.Messages[0].Content[0]
+			if block.Type != "text" || block.Text != tc.wantText {
+				t.Fatalf("block = %+v, want text %q", block, tc.wantText)
+			}
+		})
+	}
+}
+
+func TestSanitizeClaudeMessagesMixedRepairs(t *testing.T) {
+	// A string content in one message and a broken thinking block in another
+	// must both be repaired in a single pass, with independent counters.
+	body := `{"messages":[{"role":"user","content":"question"},{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"text","text":"answer"}]}]}`
+	got, dropped, normalized := sanitizeClaudeMessages([]byte(body))
+	if dropped != 1 || normalized != 1 {
+		t.Fatalf("dropped = %d, normalized = %d, want 1/1\nbody: %s", dropped, normalized, got)
+	}
+	for _, s := range []string{`"question"`, `"answer"`} {
+		if !strings.Contains(string(got), s) {
+			t.Fatalf("substring %q should survive:\n%s", s, got)
+		}
+	}
+	if strings.Contains(string(got), `"type":"thinking"`) {
+		t.Fatalf("broken thinking block should be gone:\n%s", got)
+	}
+	if !json.Valid(got) {
+		t.Fatalf("sanitized body is not valid JSON: %s", got)
+	}
+}
+
+func TestSanitizeClaudeMessagesNonStringContentLeftAlone(t *testing.T) {
+	// Only string-form contents normalize; null/number contents are not ours
+	// to fix (fail-open, let the upstream report them).
+	cases := []string{
+		`{"messages":[{"role":"user","content":null}],"thinking":{"type":"enabled"}}`,
+		`{"messages":[{"role":"user","content":42}],"thinking":{"type":"enabled"}}`,
+		`{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"plain result"}]}]}`,
+	}
+	for _, body := range cases {
+		got, dropped, normalized := sanitizeClaudeMessages([]byte(body))
+		if dropped != 0 || normalized != 0 {
+			t.Fatalf("dropped = %d, normalized = %d, want 0/0 for %s", dropped, normalized, body)
+		}
+		if string(got) != body {
+			t.Fatalf("body must be returned verbatim:\n%s", got)
+		}
 	}
 }
