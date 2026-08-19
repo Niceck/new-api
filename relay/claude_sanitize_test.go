@@ -12,8 +12,8 @@ func TestSanitizeClaudeMessagesUntouched(t *testing.T) {
 		body string
 	}{
 		{
-			name: "no thinking anywhere",
-			body: `{"model":"claude-opus-5","messages":[{"role":"user","content":"hi"}]}`,
+			name: "no thinking anywhere, array content",
+			body: `{"model":"claude-opus-5","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
 		},
 		{
 			name: "valid thinking block with signature",
@@ -22,10 +22,6 @@ func TestSanitizeClaudeMessagesUntouched(t *testing.T) {
 		{
 			name: "valid redacted_thinking block",
 			body: `{"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque"},{"type":"text","text":"a"}]}]}`,
-		},
-		{
-			name: "string-form content mentioning thinking",
-			body: `{"messages":[{"role":"user","content":"tell me about \"thinking\" blocks"}]}`,
 		},
 		{
 			name: "top-level thinking param only",

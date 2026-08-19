@@ -7,14 +7,22 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
-// Pass-through bodies are forwarded verbatim, so structurally invalid thinking
-// blocks accumulated by clients (e.g. an empty "thinking" left over from an
-// interrupted upstream stream) reach the upstream unfiltered and fail
-// Anthropic's schema validation with "each thinking block must contain
-// thinking". Dropping just those blocks keeps the rest of the conversation
-// intact and lets the request through.
+// Pass-through bodies are forwarded verbatim, so two kinds of traffic die at
+// picky upstreams unless repaired here:
+//   - structurally invalid thinking blocks accumulated by clients (e.g. an
+//     empty "thinking" left over from an interrupted stream) fail Anthropic's
+//     schema with "each thinking block must contain thinking" → dropped;
+//   - string-form message content — Anthropic's official shorthand for a
+//     single text block — is rejected by upstreams whose schema only accepts
+//     the array form ("content: Input should be a valid array", freemodel
+//     upstreams since 2026-08-18) → normalized to the canonical array form,
+//     which is lossless by the API's own equivalence.
+// Everything else is left alone so the conversation survives intact.
 //
 // Known, accepted boundaries (codex dual-round audit 2026-08-19):
+//   - The content probe matches `"content":"` and `"content": "` (compact and
+//     python-style spacing, the only forms real serializers emit); other legal
+//     spacings skip normalization and simply keep the pre-repair behavior.
 //   - A body is only rewritten when at least one block is dropped. The rewrite
 //     re-encodes the top level and the touched messages: object keys sort, JSON
 //     whitespace between tokens compacts, and <, >, & inside strings become
@@ -69,7 +77,10 @@ func sanitizeClaudeMessages(body []byte) ([]byte, int, int) {
 	if len(body) > maxSanitizeBodySize {
 		return body, 0, 0
 	}
-	if !bytes.Contains(body, []byte(`"thinking"`)) && !bytes.Contains(body, []byte(`"redacted_thinking"`)) {
+	if !bytes.Contains(body, []byte(`"thinking"`)) &&
+		!bytes.Contains(body, []byte(`"redacted_thinking"`)) &&
+		!bytes.Contains(body, []byte(`"content":"`)) &&
+		!bytes.Contains(body, []byte(`"content": "`)) {
 		return body, 0, 0
 	}
 	var root map[string]json.RawMessage
@@ -123,6 +134,9 @@ func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int,
 	if !ok {
 		return rawMsg, 0, 0
 	}
+	if common.GetJsonType(rawContent) == "string" {
+		return normalizeStringContent(rawMsg, msg, rawContent)
+	}
 	var blocks []json.RawMessage
 	if err := common.Unmarshal(rawContent, &blocks); err != nil {
 		return rawMsg, 0, 0
@@ -155,6 +169,27 @@ func sanitizeClaudeMessageContent(rawMsg json.RawMessage) (json.RawMessage, int,
 		return rawMsg, 0, 0
 	}
 	return newMsg, dropped, 0
+}
+
+// normalizeStringContent rewrites a string-form message content into the
+// canonical single text block array. Anthropic documents the two forms as
+// equivalent, so the rewrite is lossless; any decode/encode error returns the
+// message unchanged (fail-open).
+func normalizeStringContent(rawMsg json.RawMessage, msg map[string]json.RawMessage, rawContent json.RawMessage) (json.RawMessage, int, int) {
+	var contentStr string
+	if err := common.Unmarshal(rawContent, &contentStr); err != nil {
+		return rawMsg, 0, 0
+	}
+	newContent, err := common.Marshal([]map[string]string{{"type": "text", "text": contentStr}})
+	if err != nil {
+		return rawMsg, 0, 0
+	}
+	msg["content"] = newContent
+	newMsg, err := common.Marshal(msg)
+	if err != nil {
+		return rawMsg, 0, 0
+	}
+	return newMsg, 0, 1
 }
 
 // isInvalidThinkingBlock reports whether the block is a thinking-family block
