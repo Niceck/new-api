@@ -19,10 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { FILTER_ALL } from '../../constants'
 import { getDisplayGroupForBadge } from '../model-helpers.ts'
 
-// Mock FILTER_ALL constant used by the function
-const FILTER_ALL = '全部'
 
 describe('getDisplayGroupForBadge', () => {
   test('显示选中分组,当模型属于该分组时', () => {
