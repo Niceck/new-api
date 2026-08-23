@@ -231,6 +231,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
 	service.SaveChatLogFinishReason(info, claudeResponse.StopReason)
+	// 非流式路径必须在此采集正文：claudeInfo.ResponseText 只由流式 delta
+	// 事件累积，ClaudeHandler 走不到那里（2026-08-23 生产实测 content 为空）。
+	collectClaudeChatLogText(info, &claudeResponse)
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}
@@ -272,6 +275,25 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	return nil
 }
 
+// collectClaudeChatLogText 把非流式响应的 text 块拼进采集字段。
+// thinking 块一并计入：正文审计要还原模型完整输出，漏掉推理段等于记了半句话。
+func collectClaudeChatLogText(info *relaycommon.RelayInfo, resp *dto.ClaudeResponse) {
+	if !common.LogChatContentEnabled || info == nil || resp == nil {
+		return
+	}
+	var text strings.Builder
+	for _, block := range resp.Content {
+		if block.Text != nil {
+			text.WriteString(*block.Text)
+		} else if block.Thinking != nil {
+			text.WriteString(*block.Thinking)
+		}
+	}
+	if text.Len() > 0 {
+		info.ChatLogResponseContent = text.String()
+	}
+}
+
 func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -291,7 +313,11 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	if handleErr != nil {
 		return nil, handleErr
 	}
-	service.SaveChatLogResponse(info, claudeInfo.ResponseText.String(),
-		"", claudeInfo.Model)
+	// 只在 ResponseText 真有内容时才覆盖：非流式的正文已由
+	// collectClaudeChatLogText 采集，这里传空串会把它抹掉。
+	if claudeInfo.ResponseText.Len() > 0 {
+		service.SaveChatLogResponse(info, claudeInfo.ResponseText.String(),
+			"", claudeInfo.Model)
+	}
 	return claudeInfo.Usage, nil
 }
