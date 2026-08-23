@@ -114,10 +114,10 @@ func openAIRequestSnapshot(req *dto.GeneralOpenAIRequest) map[string]any {
 	if req.Temperature != nil {
 		out["temperature"] = *req.Temperature
 	}
-	if req.MaxTokens != 0 {
-		out["max_tokens"] = req.MaxTokens
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		out["max_tokens"] = *req.MaxTokens
 	}
-	if req.Stream {
+	if req.Stream != nil && *req.Stream {
 		out["stream"] = true
 	}
 	if names := openAIToolNames(req); len(names) > 0 {
