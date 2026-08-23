@@ -191,6 +191,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 
+	// 隐私敏感：复用已累积的 responseTextBuilder（见 chat_content_logger.go）。
+	service.SaveChatLogResponse(info, responseTextBuilder.String(), "", model)
+
 	return usage, nil
 }
 
@@ -289,6 +292,18 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
+
+	if common.LogChatContentEnabled && len(simpleResponse.Choices) > 0 {
+		var text strings.Builder
+		finishReason := ""
+		for _, choice := range simpleResponse.Choices {
+			text.WriteString(choice.Message.StringContent())
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
+		}
+		service.SaveChatLogResponse(info, text.String(), finishReason, simpleResponse.Model)
+	}
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:

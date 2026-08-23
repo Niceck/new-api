@@ -176,6 +176,12 @@ type RelayInfo struct {
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options
 
+	// 聊天正文采集（仅当 common.LogChatContentEnabled）。json:"-" 是必需的：
+	// RelayInfo 会被整体序列化进调试日志，正文进去等于隐私二次泄漏。
+	ChatLogResponseContent      string `json:"-"`
+	ChatLogResponseFinishReason string `json:"-"`
+	ChatLogResponseModel        string `json:"-"`
+
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo

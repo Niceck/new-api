@@ -133,6 +133,12 @@ func InitEnv() {
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
+
+	// 隐私敏感：聊天正文落库，默认关闭（见 constants.go 注释）。
+	LogChatContentEnabled = GetEnvOrDefaultBool("LOG_CHAT_CONTENT_ENABLED", false)
+	LogChatContentMaxLength = GetEnvOrDefault("LOG_CHAT_CONTENT_MAX_LENGTH", 10000)
+	LogChatContentTruncate = GetEnvOrDefaultBool("LOG_CHAT_CONTENT_TRUNCATE", true)
+
 	initConstantEnv()
 }
 

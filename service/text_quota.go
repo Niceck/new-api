@@ -523,6 +523,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	attachQuotaSaturation(ctx, relayInfo, other)
 
+	// 隐私敏感：聊天正文写进 other 的独立键，**不动 logContent**——
+	// content 里是计费明细，日志页与 reconcile/runtime_health 都依赖它。
+	// 此处是全通道唯一注入点（OpenAI/Claude 透传/Gemini 都汇聚到本函数）。
+	if chatContent := BuildChatContent(relayInfo, billingUsage); chatContent != nil && other != nil {
+		other[ChatContentKey] = chatContent
+	}
+
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     summary.PromptTokens,

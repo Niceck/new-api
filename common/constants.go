@@ -91,6 +91,23 @@ var MemoryCacheEnabled bool
 
 var LogConsumeEnabled = true
 
+// 隐私敏感：聊天正文落库开关。默认 false——正文含用户隐私，必须由部署方显式开启，
+// 且开启后由 newapi-ops 的 purge_chat_content.py 按 30 天保留期清理。
+// 正文写入 logs.other 的 chat_content 键，不动 logs.content（那里是计费明细，
+// 日志页与对账脚本都依赖它，覆盖即破坏现有展示与对账口径）。
+var LogChatContentEnabled = false
+var LogChatContentMaxLength = 10000
+var LogChatContentTruncate = true
+
+// GetLogChatContentMaxLength 返回单段正文的截断上限（rune 数，非字节）。
+// 非正值回落到默认值：0 会让每段正文都被截成空串，静默毁掉整个功能。
+func GetLogChatContentMaxLength() int {
+	if LogChatContentMaxLength <= 0 {
+		return 10000
+	}
+	return LogChatContentMaxLength
+}
+
 var TLSInsecureSkipVerify bool
 var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
 
