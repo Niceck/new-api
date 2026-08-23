@@ -217,11 +217,28 @@ func TestUsageIsRecorded(t *testing.T) {
 func TestMetadataIncludesChannelAndStream(t *testing.T) {
 	withLogging(t, 1000, true)
 	info := &relaycommon.RelayInfo{Request: openAIReq("hi"), IsStream: true}
-	info.ChannelId = 7
+	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: 7}
 	got := BuildChatContent(info, nil)
 	meta := got["metadata"].(map[string]any)
 	if meta["channel_id"] != 7 || meta["is_stream"] != true {
 		t.Errorf("metadata = %v", meta)
+	}
+}
+
+// 回归：UpstreamModelName/ChannelId 挂在内嵌 *ChannelMeta 上，
+// 该指针在 InitChannelMeta 之前为 nil——裸取会 panic 掉整个计费流程。
+func TestBuildChatContentSurvivesNilChannelMeta(t *testing.T) {
+	withLogging(t, 1000, true)
+	info := &relaycommon.RelayInfo{Request: openAIReq("hi")}
+	if info.ChannelMeta != nil {
+		t.Fatal("前置条件：ChannelMeta 应为 nil")
+	}
+	got := BuildChatContent(info, nil)
+	if got == nil {
+		t.Fatal("ChannelMeta 为 nil 时仍应产出内容")
+	}
+	if _, ok := got["metadata"].(map[string]any)["channel_id"]; ok {
+		t.Error("无 ChannelMeta 时不该出现 channel_id")
 	}
 }
 

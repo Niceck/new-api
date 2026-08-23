@@ -284,7 +284,10 @@ func buildResponseSnapshot(info *relaycommon.RelayInfo, usage *dto.Usage) map[st
 	}
 	if info.ChatLogResponseModel != "" {
 		out["model"] = info.ChatLogResponseModel
-	} else if info.UpstreamModelName != "" {
+	} else if info.ChannelMeta != nil && info.UpstreamModelName != "" {
+		// UpstreamModelName/ChannelId 都挂在内嵌的 *ChannelMeta 上：
+		// 该指针在 InitChannelMeta 之前为 nil，裸取会 panic。
+		// 计费失败等早退路径确实可能在它填充前就走到这里。
 		out["model"] = info.UpstreamModelName
 	}
 	if usage != nil {
@@ -313,7 +316,7 @@ func buildMetadataSnapshot(info *relaycommon.RelayInfo) map[string]any {
 	if info.IsStream {
 		out["is_stream"] = true
 	}
-	if info.ChannelId > 0 {
+	if info.ChannelMeta != nil && info.ChannelId > 0 {
 		out["channel_id"] = info.ChannelId
 	}
 	return out
