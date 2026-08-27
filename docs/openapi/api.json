@@ -1461,10 +1461,10 @@
       }
     },
     "/api/user/token": {
-      "get": {
+      "post": {
         "summary": "生成访问令牌",
         "deprecated": false,
-        "description": "🔐 需要登录（User权限）",
+        "description": "🔐 仅支持控制台登录会话（User权限），不允许使用个人访问令牌调用",
         "tags": [
           "用户管理"
         ],

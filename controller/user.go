@@ -398,6 +398,14 @@ func GetUser(c *gin.Context) {
 }
 
 func GenerateAccessToken(c *gin.Context) {
+	if _, ok := middleware.GetSessionAuthIdentity(c); !ok {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "This operation requires dashboard session authentication. API access token is not allowed.",
+		})
+		return
+	}
+
 	id := c.GetInt("id")
 	// get rand int 28-32
 	randI := common.GetRandomInt(4)
