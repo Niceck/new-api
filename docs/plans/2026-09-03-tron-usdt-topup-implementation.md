@@ -198,7 +198,7 @@ Use existing `getPayMoney` semantics through a controller-provided calculation o
 
 **Step 4: Implement scanner**
 
-The master-only background loop runs once immediately and then every configured interval (minimum 15 seconds, default 30). Initial checkpoint is `now-10m`. Each scan overlaps the previous checkpoint by 2 minutes, groups transfers by txid, records unmatched receipts, routes exact/on-time matches to settlement, and routes late/invalid settlement to unique tickets. Advance checkpoint to the scan’s fixed upper bound only after all pages and records finish successfully. External temporary errors retain the old checkpoint and increase the loop's bounded exponential backoff with jitter; success resets the interval.
+The master-only background loop runs once immediately and then every configured interval (minimum 15 seconds, default 30). Incremental scans stop at `now-3m`, overlap the previous checkpoint by two minutes, and an independent hourly pass reconciles the previous 25 hours. Each scan groups transfers by txid, records unmatched receipts, routes exact/on-time matches to settlement, and routes only typed business-safety outcomes to tickets. Advance checkpoint to the fixed safe watermark only after all pages and records finish successfully. External or unknown database errors retain the old checkpoint and increase the loop's bounded exponential backoff with jitter; success resets the interval.
 
 **Step 5: Verify GREEN**
 
