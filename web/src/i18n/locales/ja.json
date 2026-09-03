@@ -5281,6 +5281,7 @@
     "Payment sent but not credited? Submit a claim": "送金済みなのに未入金ですか？申請を送信",
     "Payment status": "支払い状況",
     "Payment value at locked rate": "固定レートでの支払い価値",
+    "Price data by CoinGecko": "価格データ提供：CoinGecko",
     "Receiving address": "受取アドレス",
     "Scan the receiving address": "受取アドレスをスキャン",
     "Send the exact amount before the countdown ends.": "カウントダウン終了前に正確な金額を送金してください。",

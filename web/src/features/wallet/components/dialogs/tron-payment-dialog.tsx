@@ -300,8 +300,18 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
               </div>
               <div className='bg-muted/50 rounded-lg p-3'>
                 <dt className='text-muted-foreground'>{t('Locked rate')}</dt>
-                <dd className='mt-1 font-medium tabular-nums'>
-                  ¥{formatRate(props.order.rate_cny_micros)} / USDT
+                <dd className='mt-1'>
+                  <div className='font-medium tabular-nums'>
+                    ¥{formatRate(props.order.rate_cny_micros)} / USDT
+                  </div>
+                  <a
+                    href='https://www.coingecko.com/en/api'
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='text-muted-foreground mt-1 inline-block text-xs underline underline-offset-2'
+                  >
+                    {t('Price data by CoinGecko')}
+                  </a>
                 </dd>
               </div>
               <div className='bg-muted/50 col-span-2 rounded-lg p-3'>

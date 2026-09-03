@@ -5281,6 +5281,7 @@
     "Payment sent but not credited? Submit a claim": "Платёж отправлен, но не зачислен? Подать заявку",
     "Payment status": "Статус платежа",
     "Payment value at locked rate": "Стоимость платежа по зафиксированному курсу",
+    "Price data by CoinGecko": "Данные о ценах предоставлены CoinGecko",
     "Receiving address": "Адрес получателя",
     "Scan the receiving address": "Сканировать адрес получателя",
     "Send the exact amount before the countdown ends.": "Отправьте точную сумму до завершения обратного отсчёта.",

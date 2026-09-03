@@ -5281,6 +5281,7 @@
     "Payment sent but not credited? Submit a claim": "Đã gửi tiền nhưng chưa được ghi có? Gửi khiếu nại",
     "Payment status": "Trạng thái thanh toán",
     "Payment value at locked rate": "Giá trị thanh toán theo tỷ giá đã khóa",
+    "Price data by CoinGecko": "Dữ liệu giá do CoinGecko cung cấp",
     "Receiving address": "Địa chỉ nhận",
     "Scan the receiving address": "Quét địa chỉ nhận",
     "Send the exact amount before the countdown ends.": "Gửi đúng số tiền trước khi hết thời gian đếm ngược.",

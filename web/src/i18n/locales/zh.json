@@ -5281,6 +5281,7 @@
     "Payment sent but not credited? Submit a claim": "已经付款但未到账？提交充值申诉",
     "Payment status": "付款状态",
     "Payment value at locked rate": "按锁定汇率计算的付款价值",
+    "Price data by CoinGecko": "汇率数据由 CoinGecko 提供",
     "Receiving address": "收款地址",
     "Scan the receiving address": "扫码获取收款地址",
     "Send the exact amount before the countdown ends.": "请在倒计时结束前发送完全一致的金额。",

@@ -74,7 +74,14 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
   lng: 'en',
-  resources: { en: { translation: {} } },
+  resources: {
+    en: {
+      translation: { 'Price data by CoinGecko': 'Price data by CoinGecko' },
+    },
+    zh: {
+      translation: { 'Price data by CoinGecko': '汇率数据由 CoinGecko 提供' },
+    },
+  },
 })
 
 const order: TronTopupOrder = {
@@ -131,6 +138,27 @@ describe('TronPaymentDialog', () => {
     assert.equal(formatTronCNYValue(13_791_234, 7_250_000), '99.99')
     assert.equal(bodyText.includes('¥99.99'), true)
     assert.equal(bodyText.includes('TRON / TRC20'), true)
+    const priceAttribution = document.querySelector<HTMLAnchorElement>(
+      'a[href="https://www.coingecko.com/en/api"]'
+    )
+    assert.ok(priceAttribution)
+    assert.equal(
+      priceAttribution.textContent?.trim(),
+      'Price data by CoinGecko'
+    )
+    assert.equal(priceAttribution.target, '_blank')
+    assert.match(priceAttribution.rel, /noopener/)
+    assert.match(priceAttribution.rel, /noreferrer/)
+    await act(async () => {
+      await i18n.changeLanguage('zh')
+    })
+    assert.equal(
+      priceAttribution.textContent?.trim(),
+      '汇率数据由 CoinGecko 提供'
+    )
+    await act(async () => {
+      await i18n.changeLanguage('en')
+    })
     assert.ok(
       document.querySelector('svg[aria-label="TRON payment address QR code"]')
     )
