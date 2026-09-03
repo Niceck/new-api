@@ -105,25 +105,18 @@ const (
 )
 
 var (
-	ErrTronOrderNotFound    = errors.New("TRON top-up order not found")
-	ErrTronTransferMismatch = errors.New("TRON transfer does not match order")
-	ErrTronTxAlreadyClaimed = errors.New("TRON transaction is already claimed")
-	ErrTronTicketNotOpen    = errors.New("TRON top-up ticket is not open")
-	tronModelTxIDPattern    = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
+	ErrTronOrderNotFound         = errors.New("TRON top-up order not found")
+	ErrTronTransferMismatch      = errors.New("TRON transfer does not match order")
+	ErrTronTransferPredatesOrder = errors.New("TRON transfer predates order")
+	ErrTronCreditReviewRequired  = errors.New("TRON credit requires manual review")
+	ErrTronTxAlreadyClaimed      = errors.New("TRON transaction is already claimed")
+	ErrTronTicketNotOpen         = errors.New("TRON top-up ticket is not open")
+	tronModelTxIDPattern         = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 )
 
 func CreateTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
-	if topUp == nil || order == nil || topUp.Id != 0 || order.ID != 0 {
-		return errors.New("invalid TRON top-up order")
-	}
-	if topUp.PaymentProvider != PaymentProviderTron || topUp.PaymentMethod != PaymentMethodTron || topUp.Status != common.TopUpStatusPending {
-		return ErrPaymentMethodMismatch
-	}
-	if topUp.UserId <= 0 || topUp.UserId != order.UserID || topUp.TradeNo == "" || topUp.TradeNo != order.TradeNo {
-		return errors.New("inconsistent TRON top-up order")
-	}
-	if order.ExpectedAmountMicros <= 0 || order.RateCNYMicros <= 0 || order.CreditQuota <= 0 || order.CreditQuota > common.MaxQuota || order.ExpiresAtMS <= order.CreatedAtMS || topUp.CreateTime != order.CreatedAtMS/1000 {
-		return errors.New("invalid TRON top-up amounts")
+	if err := validateNewTronTopupOrder(topUp, order); err != nil {
+		return err
 	}
 
 	topUpID := topUp.Id
@@ -141,6 +134,73 @@ func CreateTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
 		order.TopUpID = 0
 	}
 	return err
+}
+
+func CreateOrGetActiveTronTopupOrder(topUp *TopUp, order *TronTopupOrder, nowMS int64) (*TronTopupOrder, bool, error) {
+	if err := validateNewTronTopupOrder(topUp, order); err != nil {
+		return nil, false, err
+	}
+	if nowMS <= 0 {
+		return nil, false, errors.New("invalid TRON order time")
+	}
+
+	originalTopUpID := topUp.Id
+	originalOrderID := order.ID
+	var result *TronTopupOrder
+	created := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		user := User{}
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", topUp.UserId).First(&user).Error; err != nil {
+			return err
+		}
+		active := TronTopupOrder{}
+		err := tx.Table("tron_topup_orders").
+			Select("tron_topup_orders.*").
+			Joins("JOIN top_ups ON top_ups.id = tron_topup_orders.top_up_id").
+			Where("tron_topup_orders.user_id = ? AND tron_topup_orders.expires_at_ms > ? AND top_ups.status = ?", topUp.UserId, nowMS, common.TopUpStatusPending).
+			Order("tron_topup_orders.id DESC").
+			First(&active).Error
+		if err == nil {
+			result = &active
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Create(topUp).Error; err != nil {
+			return err
+		}
+		order.TopUpID = topUp.Id
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		copyOfOrder := *order
+		result = &copyOfOrder
+		created = true
+		return nil
+	})
+	if err != nil || !created {
+		topUp.Id = originalTopUpID
+		order.ID = originalOrderID
+		order.TopUpID = 0
+	}
+	return result, created, err
+}
+
+func validateNewTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
+	if topUp == nil || order == nil || topUp.Id != 0 || order.ID != 0 {
+		return errors.New("invalid TRON top-up order")
+	}
+	if topUp.PaymentProvider != PaymentProviderTron || topUp.PaymentMethod != PaymentMethodTron || topUp.Status != common.TopUpStatusPending {
+		return ErrPaymentMethodMismatch
+	}
+	if topUp.UserId <= 0 || topUp.UserId != order.UserID || topUp.TradeNo == "" || topUp.TradeNo != order.TradeNo {
+		return errors.New("inconsistent TRON top-up order")
+	}
+	if order.ExpectedAmountMicros <= 0 || order.RateCNYMicros <= 0 || order.CreditQuota <= 0 || order.CreditQuota > common.MaxQuota || order.ExpiresAtMS <= order.CreatedAtMS || topUp.CreateTime != order.CreatedAtMS/1000 {
+		return errors.New("invalid TRON top-up amounts")
+	}
+	return nil
 }
 
 func GetTronTopupOrderByTradeNo(tradeNo string) (*TronTopupOrder, error) {
@@ -590,7 +650,7 @@ func creditTronOrderTx(tx *gorm.DB, topUp *TopUp, order *TronTopupOrder, deposit
 		return 0, 0, err
 	}
 	if user.Quota < 0 || user.Quota > common.MaxQuota-creditQuota {
-		return 0, 0, errors.New("TRON top-up would exceed quota safety limit")
+		return 0, 0, fmt.Errorf("%w: quota safety limit", ErrTronCreditReviewRequired)
 	}
 	newQuota := user.Quota + creditQuota
 	if err := tx.Model(&User{}).Where("id = ?", user.Id).Update("quota", newQuota).Error; err != nil {
@@ -621,7 +681,10 @@ func validateTronOrderTransfer(topUp *TopUp, order *TronTopupOrder, transfer Tro
 	if topUp.Status != common.TopUpStatusPending || topUp.UserId != order.UserID || topUp.TradeNo != order.TradeNo {
 		return ErrTopUpStatusInvalid
 	}
-	if transfer.AmountMicros != order.ExpectedAmountMicros || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract || transfer.BlockTimestampMS < order.CreatedAtMS {
+	if transfer.BlockTimestampMS < order.CreatedAtMS {
+		return ErrTronTransferPredatesOrder
+	}
+	if transfer.AmountMicros != order.ExpectedAmountMicros || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract {
 		return ErrTronTransferMismatch
 	}
 	return nil

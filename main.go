@@ -150,6 +150,9 @@ func main() {
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
+	tronScannerContext, stopTronScanner := context.WithCancel(context.Background())
+	defer stopTronScanner()
+	service.StartTronTopupScanner(tronScannerContext)
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -223,6 +226,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	common.SysLog(fmt.Sprintf("received signal: %v, shutting down...", sig))
+	stopTronScanner()
 
 	// SSE streams may run for minutes; give them time to finish before forced exit
 	shutdownTimeout := time.Duration(common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 120)) * time.Second
@@ -307,6 +311,10 @@ func InitResources() error {
 	err = model.InitDB()
 	if err != nil {
 		common.FatalLog("failed to initialize database: " + err.Error())
+		return err
+	}
+	if err = service.InitTronTopupService(); err != nil {
+		common.FatalLog("failed to initialize TRON top-up: " + err.Error())
 		return err
 	}
 	if err = authz.Init(model.DB); err != nil {
