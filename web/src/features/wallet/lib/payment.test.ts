@@ -25,6 +25,7 @@ import {
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
+  isTronPayment,
 } from './payment'
 
 describe('payment type classification', () => {
@@ -82,5 +83,26 @@ describe('payment dispatch', () => {
 
     assert.equal(success, false)
     assert.equal(called, false)
+  })
+
+  test('never sends TRON through the generic payment processor', async () => {
+    let regularCalled = false
+    const success = await dispatchSelectedPayment(
+      { name: 'USDT (TRON/TRC20)', type: PAYMENT_TYPES.TRON },
+      100,
+      null,
+      {
+        regular: async () => {
+          regularCalled = true
+          return true
+        },
+        waffo: async () => false,
+        waffoPancake: async () => false,
+      }
+    )
+
+    assert.equal(isTronPayment(PAYMENT_TYPES.TRON), true)
+    assert.equal(success, false)
+    assert.equal(regularCalled, false)
   })
 })

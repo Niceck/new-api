@@ -39,6 +39,8 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  TronTopupOrderResponse,
+  TronTopupClaimResponse,
 } from './types'
 
 // ============================================================================
@@ -176,6 +178,36 @@ export async function requestWaffoPancakePayment(
   request: WaffoPancakePaymentRequest
 ): Promise<WaffoPancakePaymentResponse> {
   const res = await api.post('/api/user/waffo-pancake/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+export async function createTronTopupOrder(
+  amount: number
+): Promise<TronTopupOrderResponse> {
+  const res = await api.post('/api/user/tron/topup/orders', { amount }, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+export async function getTronTopupOrder(
+  tradeNo: string
+): Promise<TronTopupOrderResponse> {
+  const res = await api.get(
+    `/api/user/tron/topup/orders/${encodeURIComponent(tradeNo)}`,
+    { skipBusinessError: true } as Record<string, unknown>
+  )
+  return res.data
+}
+
+export async function submitTronTopupClaim(request: {
+  trade_no: string
+  tx_id: string
+  note: string
+}): Promise<TronTopupClaimResponse> {
+  const res = await api.post('/api/user/tron/topup/claims', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data

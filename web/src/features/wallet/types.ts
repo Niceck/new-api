@@ -60,6 +60,33 @@ export type WaffoPancakePaymentResponse = ApiResponse<
   | string
 >
 
+export type TronTopupStatus = 'pending' | 'success' | 'expired' | 'failed'
+
+export interface TronTopupOrder {
+  trade_no: string
+  network: 'mainnet'
+  receive_address: string
+  token_contract: string
+  expected_usdt_micros: number
+  rate_cny_micros: number
+  quote_updated_at_ms: number
+  expires_at_ms: number
+  credit_quota: number
+  status: TronTopupStatus
+}
+
+export interface TronTopupTicket {
+  id: number
+  user_id?: number
+  order_id?: number
+  tx_id?: string
+  reason?: string
+  status?: 'open' | 'resolved' | 'rejected'
+}
+
+export type TronTopupOrderResponse = ApiResponse<TronTopupOrder>
+export type TronTopupClaimResponse = ApiResponse<TronTopupTicket>
+
 /**
  * Creem product configuration
  */
@@ -148,6 +175,8 @@ export interface TopupInfo {
   waffo_min_topup?: number
   /** Whether Waffo Pancake topup is enabled */
   enable_waffo_pancake_topup?: boolean
+  /** Whether TRON mainnet TRC20-USDT topup is enabled */
+  enable_tron_topup?: boolean
   /** Minimum topup amount for Waffo Pancake */
   waffo_pancake_min_topup?: number
   /** Whether redemption code usage is enabled */

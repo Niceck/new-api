@@ -29,6 +29,7 @@ import { BillingHistoryDialog } from './components/dialogs/billing-history-dialo
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
 import { TransferDialog } from './components/dialogs/transfer-dialog'
+import { TronPaymentDialog } from './components/dialogs/tron-payment-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
@@ -41,11 +42,13 @@ import {
   useCreemPayment,
   useWaffoPayment,
   useWaffoPancakePayment,
+  useTronPayment,
 } from './hooks'
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
   dispatchSelectedPayment,
+  isTronPayment,
 } from './lib'
 import type {
   UserWalletData,
@@ -125,6 +128,8 @@ export function Wallet(props: WalletProps) {
     }
   }, [])
 
+  const tronPayment = useTronPayment({ onSuccess: fetchUser })
+
   useEffect(() => {
     fetchUser()
   }, [fetchUser])
@@ -171,6 +176,17 @@ export function Wallet(props: WalletProps) {
 
   // Handle payment method selection
   const handlePaymentMethodSelect = async (method: PaymentMethod) => {
+    if (isTronPayment(method.type)) {
+      setSelectedPaymentMethod(undefined)
+      setSelectedWaffoMethodIndex(null)
+      setPaymentLoading(method.type)
+      try {
+        await tronPayment.startPayment(topupAmount)
+      } finally {
+        setPaymentLoading(null)
+      }
+      return
+    }
     setSelectedPaymentMethod(method)
     setSelectedWaffoMethodIndex(null)
     setPaymentLoading(method.type)
@@ -371,6 +387,14 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleTransfer}
         availableQuota={user?.aff_quota ?? 0}
         transferring={transferring}
+      />
+
+      <TronPaymentDialog
+        open={tronPayment.open}
+        order={tronPayment.order}
+        onOpenChange={tronPayment.onOpenChange}
+        onSubmitClaim={tronPayment.submitClaim}
+        claiming={tronPayment.claiming}
       />
 
       <BillingHistoryDialog
