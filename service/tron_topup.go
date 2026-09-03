@@ -99,6 +99,9 @@ func loadTronTopupConfig() (TronTopupConfig, error) {
 	config.CoinGeckoBaseURL = "https://api.coingecko.com"
 	config.TronGridAPIKey = strings.TrimSpace(os.Getenv("TRONGRID_API_KEY"))
 	config.CoinGeckoAPIKey = strings.TrimSpace(os.Getenv("COINGECKO_API_KEY"))
+	if config.TronGridAPIKey == "" || config.CoinGeckoAPIKey == "" {
+		return TronTopupConfig{}, errors.New("TRON top-up read API keys are required")
+	}
 
 	ttlMinutes, err := strictTronEnvInt("TRON_TOPUP_ORDER_TTL_MINUTES", defaultTronOrderTTLMinutes, 5, 60)
 	if err != nil {

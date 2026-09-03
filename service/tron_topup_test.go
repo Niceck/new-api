@@ -70,6 +70,8 @@ func TestLoadTronTopupConfig_RequiresEnabledValidMainnetAddress(t *testing.T) {
 	t.Setenv("TRON_TOPUP_ENABLED", "true")
 	t.Setenv("TRON_NETWORK", "mainnet")
 	t.Setenv("TRON_RECEIVE_ADDRESS", "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f")
+	t.Setenv("TRONGRID_API_KEY", "tron-test-key")
+	t.Setenv("COINGECKO_API_KEY", "coingecko-test-key")
 
 	config, err := loadTronTopupConfig()
 	require.NoError(t, err)
@@ -86,6 +88,22 @@ func TestLoadTronTopupConfig_RequiresEnabledValidMainnetAddress(t *testing.T) {
 	config, err = loadTronTopupConfig()
 	require.NoError(t, err)
 	assert.False(t, config.Enabled)
+}
+
+func TestLoadTronTopupConfig_RejectsMissingReadAPIKeys(t *testing.T) {
+	for _, missing := range []string{"TRONGRID_API_KEY", "COINGECKO_API_KEY"} {
+		t.Run(missing, func(t *testing.T) {
+			t.Setenv("TRON_TOPUP_ENABLED", "true")
+			t.Setenv("TRON_NETWORK", "mainnet")
+			t.Setenv("TRON_RECEIVE_ADDRESS", "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f")
+			t.Setenv("TRONGRID_API_KEY", "tron-test-key")
+			t.Setenv("COINGECKO_API_KEY", "coingecko-test-key")
+			t.Setenv(missing, "")
+
+			_, err := loadTronTopupConfig()
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestTronTopupService_CreateOrderLocksFreshRateAndReusesActiveOrder(t *testing.T) {
@@ -130,6 +148,8 @@ func TestLoadTronTopupConfig_RejectsMalformedNumericSafetyValues(t *testing.T) {
 			t.Setenv("TRON_TOPUP_ENABLED", "true")
 			t.Setenv("TRON_NETWORK", "mainnet")
 			t.Setenv("TRON_RECEIVE_ADDRESS", "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f")
+			t.Setenv("TRONGRID_API_KEY", "tron-test-key")
+			t.Setenv("COINGECKO_API_KEY", "coingecko-test-key")
 			t.Setenv(tc.key, tc.value)
 			_, err := loadTronTopupConfig()
 			assert.Error(t, err)
