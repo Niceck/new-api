@@ -37,6 +37,7 @@ import {
 import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { PAYMENT_TYPES } from '../constants'
 import {
   formatCurrency,
   getDiscountLabel,
@@ -137,8 +138,26 @@ export function RechargeFormCard({
     enableWaffoPancakeTopup ||
     topupInfo?.enable_tron_topup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
-  const hasStandardPaymentMethods =
-    Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0
+  const configuredPaymentMethods = Array.isArray(topupInfo?.pay_methods)
+    ? topupInfo.pay_methods.filter(
+        (method) => method.type !== PAYMENT_TYPES.TRON
+      )
+    : []
+  const tronPaymentMethods: PaymentMethod[] = topupInfo?.enable_tron_topup
+    ? [
+        {
+          name: 'USDT (TRON/TRC20)',
+          type: PAYMENT_TYPES.TRON,
+          color: '#EF0027',
+          min_topup: getMinTopupAmount(topupInfo),
+        },
+      ]
+    : []
+  const standardPaymentMethods = [
+    ...configuredPaymentMethods,
+    ...tronPaymentMethods,
+  ]
+  const hasStandardPaymentMethods = standardPaymentMethods.length > 0
   const hasWaffoPaymentMethods =
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
@@ -320,7 +339,7 @@ export function RechargeFormCard({
                 </Label>
                 {hasStandardPaymentMethods ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {topupInfo?.pay_methods?.map((method) => {
+                    {standardPaymentMethods.map((method) => {
                       const minTopup = Math.max(
                         method.min_topup || 0,
                         getMinTopupAmount(topupInfo)

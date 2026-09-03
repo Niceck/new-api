@@ -21,13 +21,20 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const legacyTronRefreshMessage = "页面已更新，请刷新后重新发起 TRON 充值"
+
 var isTopupComplianceConfirmed = operation_setting.IsPaymentComplianceConfirmed
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := isTopupComplianceConfirmed()
 
 	// 获取支付方式
-	payMethods := append([]map[string]string(nil), operation_setting.PayMethods...)
+	payMethods := make([]map[string]string, 0, len(operation_setting.PayMethods))
+	for _, method := range operation_setting.PayMethods {
+		if method["type"] != model.PaymentMethodTron {
+			payMethods = append(payMethods, method)
+		}
+	}
 	if !complianceConfirmed {
 		payMethods = []map[string]string{}
 	}
@@ -100,21 +107,6 @@ func GetTopUpInfo(c *gin.Context) {
 	enableTron := false
 	if _, configured := getTronPublicConfig(); configured && complianceConfirmed {
 		enableTron = true
-		hasTron := false
-		for _, method := range payMethods {
-			if method["type"] == model.PaymentMethodTron {
-				hasTron = true
-				break
-			}
-		}
-		if !hasTron {
-			payMethods = append(payMethods, map[string]string{
-				"name":      "USDT (TRON/TRC20)",
-				"type":      model.PaymentMethodTron,
-				"color":     "#EF0027",
-				"min_topup": strconv.FormatInt(getMinTopup(), 10),
-			})
-		}
 	}
 
 	data := gin.H{
@@ -214,6 +206,10 @@ func RequestEpay(c *gin.Context) {
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+		return
+	}
+	if req.PaymentMethod == model.PaymentMethodTron {
+		c.JSON(http.StatusOK, gin.H{"message": legacyTronRefreshMessage})
 		return
 	}
 	if req.Amount < getMinTopup() {

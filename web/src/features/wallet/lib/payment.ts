@@ -97,6 +97,18 @@ export function isTronPayment(paymentType: string): boolean {
   return paymentType === PAYMENT_TYPES.TRON
 }
 
+export function getSubscriptionEpayMethods(
+  payMethods: PaymentMethod[] = []
+): PaymentMethod[] {
+  return payMethods.filter(
+    (method) =>
+      method?.type &&
+      method.type !== PAYMENT_TYPES.STRIPE &&
+      method.type !== PAYMENT_TYPES.CREEM &&
+      method.type !== PAYMENT_TYPES.TRON
+  )
+}
+
 export interface PaymentProcessors {
   regular: (topupAmount: number, paymentType: string) => Promise<boolean>
   waffo: (topupAmount: number, payMethodIndex: number) => Promise<boolean>

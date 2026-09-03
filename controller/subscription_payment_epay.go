@@ -27,7 +27,15 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	}
 
 	var req SubscriptionEpayPayRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if req.PaymentMethod == model.PaymentMethodTron {
+		common.ApiErrorMsg(c, legacyTronRefreshMessage)
+		return
+	}
+	if req.PlanId <= 0 {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}

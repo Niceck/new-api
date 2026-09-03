@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -203,12 +204,42 @@ func TestAdminResolveTronTopupTicket_RequiresSelectedOrderAndNote(t *testing.T) 
 	assert.Equal(t, "verified ownership", operations.resolveNote)
 }
 
-func TestGetTopUpInfo_AppendsTronOnlyWhenConfigured(t *testing.T) {
+func TestGetTopUpInfo_AdvertisesTronWithoutAddingLegacyEpayMethod(t *testing.T) {
 	operations := &stubTronTopupOperations{}
 	withTronControllerDependencies(t, operations)
+	originalPayMethods := operation_setting.PayMethods
+	operation_setting.PayMethods = []map[string]string{
+		{"name": "Alipay", "type": "alipay"},
+		{"name": "Legacy TRON", "type": model.PaymentMethodTron},
+	}
+	t.Cleanup(func() { operation_setting.PayMethods = originalPayMethods })
 
 	recorder := tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
 	require.Equal(t, http.StatusOK, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), `"type":"tron"`)
+	assert.Contains(t, recorder.Body.String(), `"enable_tron_topup":true`)
+	assert.NotContains(t, recorder.Body.String(), `"type":"tron"`)
 	assert.NotContains(t, recorder.Body.String(), "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f")
+}
+
+func TestRequestEpay_RejectsTronBeforeLegacyGateway(t *testing.T) {
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", `{"amount":0,"payment_method":"tron"}`, 42, RequestEpay)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "页面已更新，请刷新后重新发起 TRON 充值", response.Message)
+}
+
+func TestSubscriptionRequestEpay_RejectsTronBeforePlanLookup(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", `{"plan_id":0,"payment_method":"tron"}`, 42, SubscriptionRequestEpay)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "页面已更新，请刷新后重新发起 TRON 充值", response.Message)
 }
