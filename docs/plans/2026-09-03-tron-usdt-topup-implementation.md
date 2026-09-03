@@ -17,6 +17,8 @@
 - Create: `service/tron_client_test.go`
 - Create: `service/tron_money.go`
 - Create: `service/tron_money_test.go`
+- Create: `service/tron_address.go`
+- Create: `service/tron_address_test.go`
 
 **Step 1: Write failing money tests**
 
@@ -66,6 +68,7 @@ Use `httptest.Server` only at the external boundary. Cover:
 - `value` integer parsing, official contract/decimals/type/address checks.
 - same-tx rows are grouped and summed with overflow protection.
 - 429/503 returns a typed retryable error; context cancellation stops requests.
+- Base58Check accepts the configured TRON address and rejects bad alphabet, length, network byte, and checksum.
 
 Define narrow clients:
 
@@ -81,14 +84,14 @@ type TronChainClient interface {
 
 **Step 5: Verify RED, implement clients, then verify GREEN**
 
-Keep URLs in a validated config object; production network values map to fixed official base URLs, while tests inject an `httptest` URL. Send `TRON-PRO-API-KEY` and CoinGecko key only when configured. Bound body reads, set HTTP timeouts, use `common.DecodeJson`, and never log keys or raw response bodies.
+Keep URLs in a validated config object; production network values map to fixed official base URLs, while tests inject an `httptest` URL. Send `TRON-PRO-API-KEY` and CoinGecko key only when configured. Bound body reads, set HTTP timeouts, use `common.DecodeJson`, validate addresses with Base58Check, and never log keys or raw response bodies.
 
 Run the Task 1 tests, then `go test ./service -count=1`. Expected: PASS.
 
 **Step 6: Commit**
 
 ```bash
-git add service/tron_client.go service/tron_client_test.go service/tron_money.go service/tron_money_test.go
+git add service/tron_client.go service/tron_client_test.go service/tron_money.go service/tron_money_test.go service/tron_address.go service/tron_address_test.go
 git commit -m "feat: add TRON pricing and chain clients"
 ```
 
@@ -191,11 +194,11 @@ Run `go test ./service -run 'Tron' -count=1`. Expected: FAIL for missing order/s
 
 **Step 3: Implement order creation**
 
-Use existing `getPayMoney` semantics through a controller-provided calculation or a stable exported payment calculation function, then freeze `CreditQuota` using `common.QuotaFromDecimalChecked/Strict`. Generate `TRONUSR...` trade numbers, allocate a global never-reused 1–9999 micro-tail, and create both rows atomically. Defaults: 20-minute order, maximum CNY amount 10,000; environment variables may lower/raise only within hard safety caps.
+Use existing `getPayMoney` semantics through a controller-provided calculation or a stable exported payment calculation function, then freeze `CreditQuota` using `common.QuotaFromDecimalChecked/Strict`. Generate `TRONUSR...` trade numbers, allocate a global never-reused 1–9999 micro-tail, and create both rows atomically. Defaults: 20-minute order and maximum CNY amount 2,000. The effective maximum is the smaller of configuration and `common.MaxQuota / QuotaPerUnit`; environment variables can only tighten, never bypass, the hard quota cap. Store quote and expiry times in milliseconds.
 
 **Step 4: Implement scanner**
 
-The master-only background loop runs once immediately and then every configured interval (minimum 15 seconds, default 30). Initial checkpoint is `now-10m`. Each scan overlaps the previous checkpoint by 2 minutes, groups transfers by txid, records unmatched receipts, routes exact/on-time matches to settlement, and routes late/invalid settlement to unique tickets. Advance checkpoint to the scan’s fixed upper bound only after all pages and records finish successfully. External temporary errors retain the old checkpoint.
+The master-only background loop runs once immediately and then every configured interval (minimum 15 seconds, default 30). Initial checkpoint is `now-10m`. Each scan overlaps the previous checkpoint by 2 minutes, groups transfers by txid, records unmatched receipts, routes exact/on-time matches to settlement, and routes late/invalid settlement to unique tickets. Advance checkpoint to the scan’s fixed upper bound only after all pages and records finish successfully. External temporary errors retain the old checkpoint and increase the loop's bounded exponential backoff with jitter; success resets the interval.
 
 **Step 5: Verify GREEN**
 
