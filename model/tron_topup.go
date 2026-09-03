@@ -102,6 +102,7 @@ const (
 	tronClaimMinPercent    int64 = 90
 	tronClaimMaxPercent    int64 = 110
 	TronClaimGracePeriodMS int64 = 24 * 60 * 60 * 1000
+	tronMaxClaimsPerOrder  int64 = 3
 )
 
 var (
@@ -111,6 +112,8 @@ var (
 	ErrTronCreditReviewRequired  = errors.New("TRON credit requires manual review")
 	ErrTronTxAlreadyClaimed      = errors.New("TRON transaction is already claimed")
 	ErrTronTicketNotOpen         = errors.New("TRON top-up ticket is not open")
+	ErrTronClaimWindowClosed     = errors.New("TRON top-up claim window is closed")
+	ErrTronClaimLimitReached     = errors.New("TRON top-up claim limit reached")
 	tronModelTxIDPattern         = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 )
 
@@ -567,9 +570,13 @@ func RecordUnmatchedTronDeposit(transfer TronTransferRecord) (*TronDeposit, erro
 }
 
 func SubmitTronTopupClaim(userID int, tradeNo string, txID string, note string) (*TronTopupTicket, error) {
+	return submitTronTopupClaimAt(userID, tradeNo, txID, note, common.GetTimestamp()*1000)
+}
+
+func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string, nowMS int64) (*TronTopupTicket, error) {
 	txID = strings.ToLower(strings.TrimSpace(txID))
 	note = strings.TrimSpace(note)
-	if userID <= 0 || tradeNo == "" || !tronModelTxIDPattern.MatchString(txID) || len([]rune(note)) > 500 {
+	if userID <= 0 || tradeNo == "" || !tronModelTxIDPattern.MatchString(txID) || len([]rune(note)) > 500 || nowMS <= 0 {
 		return nil, errors.New("invalid TRON top-up claim")
 	}
 
@@ -577,8 +584,12 @@ func SubmitTronTopupClaim(userID int, tradeNo string, txID string, note string) 
 	var claimKey string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		order := TronTopupOrder{}
-		if err := tx.Where("trade_no = ? AND user_id = ?", tradeNo, userID).First(&order).Error; err != nil {
+		err := lockForUpdate(tx).Where("trade_no = ? AND user_id = ?", tradeNo, userID).First(&order).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrTronOrderNotFound
+		}
+		if err != nil {
+			return err
 		}
 		topUp := TopUp{}
 		if err := tx.Where("id = ?", order.TopUpID).First(&topUp).Error; err != nil {
@@ -590,13 +601,16 @@ func SubmitTronTopupClaim(userID int, tradeNo string, txID string, note string) 
 
 		claimKey = fmt.Sprintf("claim:%d:%d:%s", userID, order.ID, txID)
 		existingTicket := TronTopupTicket{}
-		err := tx.Where("claim_key = ?", claimKey).First(&existingTicket).Error
+		err = tx.Where("claim_key = ?", claimKey).First(&existingTicket).Error
 		if err == nil {
 			result = existingTicket
 			return nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
+		}
+		if nowMS > order.ExpiresAtMS && nowMS-order.ExpiresAtMS > TronClaimGracePeriodMS {
+			return ErrTronClaimWindowClosed
 		}
 
 		var depositID *int64
@@ -611,7 +625,33 @@ func SubmitTronTopupClaim(userID int, tradeNo string, txID string, note string) 
 			return err
 		}
 
-		nowMS := common.GetTimestamp() * 1000
+		var claimCount int64
+		if err := tx.Model(&TronTopupTicket{}).
+			Where("order_id = ? AND reason = ?", order.ID, TronTicketReasonUserClaim).
+			Count(&claimCount).Error; err != nil {
+			return err
+		}
+		if claimCount >= tronMaxClaimsPerOrder {
+			return ErrTronClaimLimitReached
+		}
+
+		openTicket := TronTopupTicket{}
+		err = lockForUpdate(tx).
+			Where("order_id = ? AND reason = ? AND status = ?", order.ID, TronTicketReasonUserClaim, TronTicketStatusOpen).
+			Order("id ASC").
+			First(&openTicket).Error
+		if err == nil {
+			openTicket.Status = TronTicketStatusRejected
+			openTicket.AdminNote = "superseded by corrected claim"
+			openTicket.ResolvedAtMS = nowMS
+			openTicket.UpdatedAtMS = nowMS
+			if err := tx.Save(&openTicket).Error; err != nil {
+				return err
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
 		result = TronTopupTicket{
 			UserID:      userID,
 			OrderID:     order.ID,
@@ -652,6 +692,10 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 	var creditedQuota int
 	var tradeNo string
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		order := TronTopupOrder{}
+		if err := lockForUpdate(tx).Where("id = ?", selectedOrderID).First(&order).Error; err != nil {
+			return err
+		}
 		ticket := TronTopupTicket{}
 		if err := lockForUpdate(tx).Where("id = ?", ticketID).First(&ticket).Error; err != nil {
 			return err
@@ -669,10 +713,6 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 			return ErrTronTransferMismatch
 		}
 
-		order := TronTopupOrder{}
-		if err := lockForUpdate(tx).Where("id = ?", selectedOrderID).First(&order).Error; err != nil {
-			return err
-		}
 		topUp := TopUp{}
 		if err := lockForUpdate(tx).Where("id = ?", order.TopUpID).First(&topUp).Error; err != nil {
 			return err
@@ -749,10 +789,10 @@ func creditTronOrderTx(tx *gorm.DB, topUp *TopUp, order *TronTopupOrder, deposit
 	if err := lockForUpdate(tx).Select("id", "quota").Where("id = ?", order.UserID).First(&user).Error; err != nil {
 		return 0, 0, err
 	}
-	if user.Quota < 0 || user.Quota > common.MaxQuota-creditQuota {
+	if int64(user.Quota) > int64(common.MaxQuota)-int64(creditQuota) {
 		return 0, 0, fmt.Errorf("%w: quota safety limit", ErrTronCreditReviewRequired)
 	}
-	newQuota := user.Quota + creditQuota
+	newQuota := int(int64(user.Quota) + int64(creditQuota))
 	if err := tx.Model(&User{}).Where("id = ?", user.Id).Update("quota", newQuota).Error; err != nil {
 		return 0, 0, err
 	}

@@ -1,12 +1,14 @@
 package model
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 const (
@@ -111,6 +113,54 @@ func TestSettleTronDeposit_CreditsExactlyOnceOnReplay(t *testing.T) {
 	assert.Equal(t, int64(1), deposits)
 }
 
+func TestSettleTronDeposit_CreditsNegativeBalanceExactlyOnce(t *testing.T) {
+	truncateTables(t)
+	topUp, order := createTronLedgerFixture(t, "TRON-negative-balance", 8105, 2_750_126, 1_800_001_200_000)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", -500).Error)
+	transfer := tronTransfer("9", order.ExpectedAmountMicros, order.CreatedAtMS+1)
+
+	first, err := SettleTronDeposit(transfer, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, first.Credited)
+	assert.False(t, first.AlreadyProcessed)
+
+	second, err := SettleTronDeposit(transfer, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, second.AlreadyProcessed)
+	assert.Equal(t, -500+order.CreditQuota, getUserQuotaForPaymentGuardTest(t, topUp.UserId))
+}
+
+func TestSettleTronDeposit_EnforcesQuotaUpperBoundaryAtomically(t *testing.T) {
+	t.Run("exact maximum succeeds", func(t *testing.T) {
+		truncateTables(t)
+		topUp, order := createTronLedgerFixture(t, "TRON-quota-max", 8106, 2_750_127, 1_800_001_200_000)
+		initialQuota := common.MaxQuota - order.CreditQuota
+		require.NoError(t, DB.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", initialQuota).Error)
+
+		_, err := SettleTronDeposit(tronTransfer("a", order.ExpectedAmountMicros, order.CreatedAtMS+1), "tron-scanner")
+		require.NoError(t, err)
+		assert.Equal(t, common.MaxQuota, getUserQuotaForPaymentGuardTest(t, topUp.UserId))
+	})
+
+	t.Run("one over maximum rolls back", func(t *testing.T) {
+		truncateTables(t)
+		topUp, order := createTronLedgerFixture(t, "TRON-quota-over", 8107, 2_750_128, 1_800_001_200_000)
+		initialQuota := common.MaxQuota - order.CreditQuota + 1
+		require.NoError(t, DB.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", initialQuota).Error)
+
+		_, err := SettleTronDeposit(tronTransfer("b", order.ExpectedAmountMicros, order.CreatedAtMS+1), "tron-scanner")
+		require.ErrorIs(t, err, ErrTronCreditReviewRequired)
+		assert.Equal(t, initialQuota, getUserQuotaForPaymentGuardTest(t, topUp.UserId))
+		assert.Equal(t, common.TopUpStatusPending, GetTopUpByTradeNo(topUp.TradeNo).Status)
+		var storedOrder TronTopupOrder
+		require.NoError(t, DB.First(&storedOrder, order.ID).Error)
+		assert.Zero(t, storedOrder.CompletedAtMS)
+		var depositCount int64
+		require.NoError(t, DB.Model(&TronDeposit{}).Count(&depositCount).Error)
+		assert.Zero(t, depositCount)
+	})
+}
+
 func TestSettleTronDeposit_RejectsWrongProviderAmountContractAddressAndLateBlock(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -181,6 +231,90 @@ func TestSubmitTronClaim_PreventsCrossUserTxidClaim(t *testing.T) {
 	assert.Equal(t, ticket.TxID, competing.TxID)
 }
 
+func TestSubmitTronClaim_SupersedesOpenTicketWithImmutableReplacement(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-claim-update", 8303, 5_000_103, 1_800_001_200_000)
+
+	first, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat("1", 64), "first txid")
+	require.NoError(t, err)
+	updated, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat("2", 64), "corrected txid")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first.ID, updated.ID)
+	assert.Equal(t, strings.Repeat("2", 64), updated.TxID)
+	assert.Equal(t, "corrected txid", updated.UserNote)
+	var superseded TronTopupTicket
+	require.NoError(t, DB.First(&superseded, first.ID).Error)
+	assert.Equal(t, TronTicketStatusRejected, superseded.Status)
+	assert.Equal(t, strings.Repeat("1", 64), superseded.TxID)
+	assert.Contains(t, superseded.AdminNote, "superseded")
+	var ticketCount int64
+	require.NoError(t, DB.Model(&TronTopupTicket{}).Where("order_id = ? AND reason = ?", order.ID, TronTicketReasonUserClaim).Count(&ticketCount).Error)
+	assert.Equal(t, int64(2), ticketCount)
+}
+
+func TestSubmitTronClaim_RejectsNewClaimAfterReviewWindow(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-claim-window", 8304, 5_000_104, 1_800_001_200_000)
+	nowMS := common.GetTimestamp() * 1000
+	require.NoError(t, DB.Model(order).Updates(map[string]any{
+		"created_at_ms": nowMS - TronClaimGracePeriodMS - 120_000,
+		"expires_at_ms": nowMS - TronClaimGracePeriodMS - 60_000,
+	}).Error)
+
+	_, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat("3", 64), "too late")
+	require.ErrorContains(t, err, "claim window")
+}
+
+func TestSubmitTronClaim_AllowsExactReviewDeadlineOnly(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-claim-deadline", 8306, 5_000_106, 1_800_001_200_000)
+	deadlineMS := order.ExpiresAtMS + TronClaimGracePeriodMS
+
+	_, err := submitTronTopupClaimAt(order.UserID, order.TradeNo, strings.Repeat("a", 64), "at deadline", deadlineMS)
+	require.NoError(t, err)
+	_, err = submitTronTopupClaimAt(order.UserID, order.TradeNo, strings.Repeat("b", 64), "after deadline", deadlineMS+1)
+	require.ErrorIs(t, err, ErrTronClaimWindowClosed)
+}
+
+func TestSubmitTronClaim_LimitsLifetimeTicketsPerOrder(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-claim-limit", 8305, 5_000_105, 1_800_001_200_000)
+	nowMS := common.GetTimestamp() * 1000
+
+	for index, txChar := range []string{"4", "5", "6"} {
+		ticket, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat(txChar, 64), "claim")
+		require.NoError(t, err)
+		require.NoError(t, RejectTronTopupTicket(ticket.ID, 1, "invalid evidence", nowMS+int64(index)))
+	}
+
+	_, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat("7", 64), "one claim too many")
+	require.ErrorContains(t, err, "claim limit")
+}
+
+func TestSubmitTronClaim_PropagatesOrderQueryFailure(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-claim-db-error", 8307, 5_000_107, 1_800_001_200_000)
+	forcedErr := errors.New("forced order query failure")
+	callbackName := "tron-test-order-query-failure"
+	callbackRegistered := true
+	require.NoError(t, DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "tron_topup_orders" {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = DB.Callback().Query().Remove(callbackName)
+		}
+	})
+
+	_, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat("c", 64), "query failure")
+	require.ErrorIs(t, err, forcedErr)
+	require.NoError(t, DB.Callback().Query().Remove(callbackName))
+	callbackRegistered = false
+}
+
 func TestResolveTronTicket_UsesVerifiedDepositAndCannotReuseTxid(t *testing.T) {
 	truncateTables(t)
 	_, order := createTronLedgerFixture(t, "TRON-resolve", 8401, 6_000_000, 1_800_001_200_000)
@@ -205,6 +339,66 @@ func TestResolveTronTicket_UsesVerifiedDepositAndCannotReuseTxid(t *testing.T) {
 	require.ErrorIs(t, ResolveTronTopupTicket(ticket.ID, otherOrder.ID, transfer, 1, "mismatched retry"), ErrTronTransferMismatch)
 
 	require.ErrorIs(t, ResolveTronTopupTicket(competing.ID, otherOrder.ID, transfer, 1, "wrong owner"), ErrTronTicketNotOpen)
+}
+
+func TestResolveTronTicket_RecoversHistoricalCreditFailureForNegativeBalance(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-negative-recovery", 8403, 6_000_003, 1_800_001_200_000)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", order.UserID).Update("quota", -700).Error)
+	transfer := tronTransfer("8", order.ExpectedAmountMicros, order.CreatedAtMS+1)
+	deposit, err := RecordUnmatchedTronDeposit(transfer)
+	require.NoError(t, err)
+	ticket := TronTopupTicket{
+		UserID:      order.UserID,
+		OrderID:     order.ID,
+		DepositID:   &deposit.ID,
+		ClaimKey:    "auto:credit_failed:" + transfer.TxID,
+		TxID:        transfer.TxID,
+		Reason:      TronTicketReasonCreditFailed,
+		Status:      TronTicketStatusOpen,
+		CreatedAtMS: transfer.ObservedAtMS,
+		UpdatedAtMS: transfer.ObservedAtMS,
+	}
+	require.NoError(t, DB.Create(&ticket).Error)
+
+	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "verified historic payment"))
+	assert.Equal(t, -700+order.CreditQuota, getUserQuotaForPaymentGuardTest(t, order.UserID))
+	var resolved TronTopupTicket
+	require.NoError(t, DB.First(&resolved, ticket.ID).Error)
+	assert.Equal(t, TronTicketStatusResolved, resolved.Status)
+}
+
+func TestResolveTronTicket_LocksOrderBeforeTicket(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-lock-order", 8404, 6_000_004, 1_800_001_200_000)
+	transfer := tronTransfer("7", order.ExpectedAmountMicros, order.CreatedAtMS+1)
+	_, err := RecordUnmatchedTronDeposit(transfer)
+	require.NoError(t, err)
+	ticket, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, transfer.TxID, "lock order")
+	require.NoError(t, err)
+
+	queryTables := make([]string, 0, 2)
+	callbackName := "tron-test-resolution-lock-order"
+	callbackRegistered := true
+	require.NoError(t, DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil {
+			return
+		}
+		if tx.Statement.Table == "tron_topup_orders" || tx.Statement.Table == "tron_topup_tickets" {
+			queryTables = append(queryTables, tx.Statement.Table)
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = DB.Callback().Query().Remove(callbackName)
+		}
+	})
+
+	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "verified evidence"))
+	require.NoError(t, DB.Callback().Query().Remove(callbackName))
+	callbackRegistered = false
+	require.GreaterOrEqual(t, len(queryTables), 2)
+	assert.Equal(t, []string{"tron_topup_orders", "tron_topup_tickets"}, queryTables[:2])
 }
 
 func TestResolveTronTicket_AllowsCompetingClaimsButCreditsSelectedRightfulOrder(t *testing.T) {
