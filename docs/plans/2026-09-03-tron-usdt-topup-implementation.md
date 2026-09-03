@@ -56,7 +56,7 @@ Expected: FAIL because the types/functions do not exist.
 
 **Step 3: Implement minimal fixed-point math**
 
-Use `decimal.Decimal` until the final integer conversion. Store USDT in 10^-6 units and CNY/USDT in 10^-6 units. Tail must be in `[1, 9999]`, the resulting payment must be positive, and `creditQuota` must be within `common.MaxQuota`. Claim quota is proportional to actual/expected payment, rounded down and rejected on zero/overflow.
+Use `decimal.Decimal` until the final integer conversion. Store USDT in 10^-6 units and CNY/USDT in 10^-6 units. Round the theoretical payment to the nearest USDT micro-unit, then probe `0, ±1, ±2, ... ±4999` (with randomized sign order) only as needed to avoid globally reused amounts. The resulting payment must be positive, and `creditQuota` must be within `common.MaxQuota`. Claim quota is proportional to actual/expected payment, rounded down and rejected on zero/overflow.
 
 **Step 4: Write failing HTTP client tests**
 

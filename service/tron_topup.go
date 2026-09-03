@@ -23,7 +23,6 @@ const (
 	maximumTronTopupMaxCNY         int64 = 2_000
 	defaultTronOrderTTLMinutes           = 20
 	defaultTronScanIntervalSeconds       = 30
-	tronOrderTailAttempts                = 9_999
 )
 
 type TronTopupConfig struct {
@@ -71,7 +70,7 @@ type tronTopupService struct {
 	priceClient     TronPriceClient
 	chainClient     TronChainClient
 	now             func() time.Time
-	tailSource      func() (int64, error)
+	probeSeedSource func() (int64, error)
 	reconcileMu     sync.Mutex
 	lastReconcileMS int64
 }
@@ -138,8 +137,8 @@ func strictTronEnvInt(name string, defaultValue int, minimum int, maximum int) (
 	return value, nil
 }
 
-func newTronTopupService(config TronTopupConfig, priceClient TronPriceClient, chainClient TronChainClient, now func() time.Time, tailSource func() (int64, error)) *tronTopupService {
-	return &tronTopupService{config: config, priceClient: priceClient, chainClient: chainClient, now: now, tailSource: tailSource}
+func newTronTopupService(config TronTopupConfig, priceClient TronPriceClient, chainClient TronChainClient, now func() time.Time, probeSeedSource func() (int64, error)) *tronTopupService {
+	return &tronTopupService{config: config, priceClient: priceClient, chainClient: chainClient, now: now, probeSeedSource: probeSeedSource}
 }
 
 func InitTronTopupService() error {
@@ -167,7 +166,7 @@ func InitTronTopupService() error {
 	if err != nil {
 		return err
 	}
-	defaultTronService = newTronTopupService(config, priceClient, chainClient, time.Now, randomTronTail)
+	defaultTronService = newTronTopupService(config, priceClient, chainClient, time.Now, randomTronProbeSeed)
 	return nil
 }
 
@@ -199,7 +198,7 @@ func GetDefaultTronTopupService() (*tronTopupService, error) {
 }
 
 func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requestedAmount int64, payCNY decimal.Decimal, creditQuota int) (TronOrderView, error) {
-	if !s.config.Enabled || s.priceClient == nil || s.now == nil || s.tailSource == nil || userID <= 0 || requestedAmount <= 0 || !payCNY.IsPositive() || payCNY.GreaterThan(decimal.NewFromInt(s.config.MaxCNY)) {
+	if !s.config.Enabled || s.priceClient == nil || s.now == nil || s.probeSeedSource == nil || userID <= 0 || requestedAmount <= 0 || !payCNY.IsPositive() || payCNY.GreaterThan(decimal.NewFromInt(s.config.MaxCNY)) {
 		return TronOrderView{}, errors.New("TRON top-up amount is out of range")
 	}
 	if creditQuota <= 0 || creditQuota > common.MaxQuota {
@@ -222,17 +221,17 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 	if quoteUpdatedAt.After(now.Add(30*time.Second)) || now.Sub(quoteUpdatedAt) > tronPriceMaxAge {
 		return TronOrderView{}, errors.New("USDT/CNY price is stale")
 	}
-	startTail, err := s.tailSource()
+	probeSeed, err := s.probeSeedSource()
 	if err != nil {
 		return TronOrderView{}, errors.New("failed to allocate TRON payment amount")
 	}
-	if startTail < tronMinTail || startTail > tronMaxTail {
-		return TronOrderView{}, errors.New("TRON payment tail source returned invalid value")
+	if probeSeed < tronProbeSeedMin || probeSeed > tronProbeSeedMax {
+		return TronOrderView{}, errors.New("TRON payment probe seed source returned invalid value")
 	}
 
-	for attempt := int64(0); attempt < tronOrderTailAttempts; attempt++ {
-		tail := ((startTail - 1 + attempt) % tronMaxTail) + 1
-		quote, err := calculateTronPayment(payCNY, rate, creditQuota, tail)
+	for attempt := int64(0); attempt < tronUniqueCandidateCount; attempt++ {
+		offsetMicros := tronPaymentUniqueOffset(attempt, probeSeed)
+		quote, err := calculateTronPayment(payCNY, rate, creditQuota, offsetMicros)
 		if err != nil {
 			return TronOrderView{}, err
 		}
@@ -271,8 +270,23 @@ func tronOrderView(order *model.TronTopupOrder, status string, network string) T
 	return TronOrderView{TradeNo: order.TradeNo, Network: network, ReceiveAddress: order.ReceiveAddress, TokenContract: order.TokenContract, ExpectedUSDTMicros: order.ExpectedAmountMicros, RateCNYMicros: order.RateCNYMicros, QuoteUpdatedAtMS: order.QuoteUpdatedAtMS, ExpiresAtMS: order.ExpiresAtMS, CreditQuota: order.CreditQuota, Status: status}
 }
 
-func randomTronTail() (int64, error) {
-	value, err := rand.Int(rand.Reader, big.NewInt(tronMaxTail))
+func tronPaymentUniqueOffset(attempt int64, probeSeed int64) int64 {
+	if attempt == 0 {
+		return 0
+	}
+	magnitude := (attempt + 1) / 2
+	positive := attempt%2 == 1
+	if probeSeed%2 == 1 {
+		positive = !positive
+	}
+	if positive {
+		return magnitude
+	}
+	return -magnitude
+}
+
+func randomTronProbeSeed() (int64, error) {
+	value, err := rand.Int(rand.Reader, big.NewInt(tronUniqueCandidateCount))
 	if err != nil {
 		return 0, err
 	}

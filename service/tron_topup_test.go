@@ -111,16 +111,16 @@ func TestTronTopupService_CreateOrderLocksFreshRateAndReusesActiveOrder(t *testi
 	seedTronServiceUser(t, 9101)
 	now := time.UnixMilli(1_800_000_000_000)
 	price := &stubTronPriceClient{rate: decimal.RequireFromString("7.25"), updatedAt: now.Add(-20 * time.Second)}
-	tails := []int64{1234}
+	probeSeeds := []int64{1234}
 	service := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) {
-		tail := tails[0]
-		tails = tails[1:]
-		return tail, nil
+		seed := probeSeeds[0]
+		probeSeeds = probeSeeds[1:]
+		return seed, nil
 	})
 
 	first, err := service.CreateOrder(context.Background(), 9101, 100, decimal.NewFromInt(100), 50_000_000)
 	require.NoError(t, err)
-	assert.Equal(t, int64(13_791_234), first.ExpectedUSDTMicros)
+	assert.Equal(t, int64(13_793_103), first.ExpectedUSDTMicros)
 	assert.Equal(t, int64(7_250_000), first.RateCNYMicros)
 	assert.Equal(t, now.Add(20*time.Minute).UnixMilli(), first.ExpiresAtMS)
 
@@ -162,10 +162,10 @@ func TestTronTopupService_ConcurrentSameUserCreateReturnsOneActiveOrder(t *testi
 	seedTronServiceUser(t, 9104)
 	now := time.UnixMilli(1_800_000_000_000)
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
-	var nextTail atomic.Int64
-	nextTail.Store(100)
+	var nextProbeSeed atomic.Int64
+	nextProbeSeed.Store(100)
 	service := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) {
-		return nextTail.Add(1), nil
+		return nextProbeSeed.Add(1), nil
 	})
 
 	start := make(chan struct{})
@@ -209,14 +209,32 @@ func TestTronTopupService_CreateOrderRetriesAmountCollision(t *testing.T) {
 
 	first, err := service.CreateOrder(context.Background(), 9102, 100, decimal.NewFromInt(100), 100)
 	require.NoError(t, err)
-	assert.Equal(t, int64(10_000_100), first.ExpectedUSDTMicros)
+	assert.Equal(t, int64(10_000_000), first.ExpectedUSDTMicros)
 
 	// Mark the first order expired so a new order is eligible while its globally
 	// unique amount remains reserved forever.
 	require.NoError(t, model.DB.Model(&model.TronTopupOrder{}).Where("trade_no = ?", first.TradeNo).Update("expires_at_ms", now.Add(-time.Second).UnixMilli()).Error)
 	second, err := service.CreateOrder(context.Background(), 9102, 101, decimal.NewFromInt(100), 100)
 	require.NoError(t, err)
-	assert.Equal(t, int64(10_000_101), second.ExpectedUSDTMicros)
+	assert.Equal(t, int64(10_000_001), second.ExpectedUSDTMicros)
+}
+
+func TestTronPaymentUniqueOffset_CoversEveryBoundedCandidateOnce(t *testing.T) {
+	for _, probeSeed := range []int64{1, 2} {
+		seen := make(map[int64]struct{}, tronUniqueCandidateCount)
+		for attempt := int64(0); attempt < tronUniqueCandidateCount; attempt++ {
+			offset := tronPaymentUniqueOffset(attempt, probeSeed)
+			assert.GreaterOrEqual(t, offset, -tronMaxUniqueOffsetMicros)
+			assert.LessOrEqual(t, offset, tronMaxUniqueOffsetMicros)
+			_, duplicate := seen[offset]
+			assert.False(t, duplicate)
+			seen[offset] = struct{}{}
+		}
+		assert.Len(t, seen, int(tronUniqueCandidateCount))
+		assert.Contains(t, seen, int64(0))
+		assert.Contains(t, seen, -tronMaxUniqueOffsetMicros)
+		assert.Contains(t, seen, tronMaxUniqueOffsetMicros)
+	}
 }
 
 func TestTronTopupService_CreateOrderFailsClosedOnPriceAndQuotaBounds(t *testing.T) {
