@@ -101,7 +101,7 @@ const (
 
 	tronClaimMinPercent    int64 = 90
 	tronClaimMaxPercent    int64 = 110
-	tronClaimGracePeriodMS int64 = 24 * 60 * 60 * 1000
+	TronClaimGracePeriodMS int64 = 24 * 60 * 60 * 1000
 )
 
 var (
@@ -210,6 +210,106 @@ func GetTronTopupOrderByTradeNo(tradeNo string) (*TronTopupOrder, error) {
 		return nil, nil
 	}
 	return &order, err
+}
+
+func GetTronTopupOrderForUser(userID int, tradeNo string) (*TronTopupOrder, *TopUp, error) {
+	tradeNo = strings.TrimSpace(tradeNo)
+	if userID <= 0 || tradeNo == "" || len(tradeNo) > 255 {
+		return nil, nil, ErrTronOrderNotFound
+	}
+	var order TronTopupOrder
+	if err := DB.Where("user_id = ? AND trade_no = ?", userID, tradeNo).First(&order).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrTronOrderNotFound
+		}
+		return nil, nil, err
+	}
+	var topUp TopUp
+	if err := DB.Where("id = ?", order.TopUpID).First(&topUp).Error; err != nil {
+		return nil, nil, err
+	}
+	if topUp.UserId != userID || topUp.TradeNo != tradeNo || topUp.PaymentProvider != PaymentProviderTron {
+		return nil, nil, ErrTronTransferMismatch
+	}
+	return &order, &topUp, nil
+}
+
+func GetTronTopupOrderByID(orderID int64) (*TronTopupOrder, error) {
+	var order TronTopupOrder
+	err := DB.Where("id = ?", orderID).First(&order).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrTronOrderNotFound
+	}
+	return &order, err
+}
+
+func GetTronTopupTicketByID(ticketID int64) (*TronTopupTicket, error) {
+	var ticket TronTopupTicket
+	err := DB.Where("id = ?", ticketID).First(&ticket).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.New("TRON top-up ticket not found")
+	}
+	return &ticket, err
+}
+
+func ListTronTopupTickets(pageInfo *common.PageInfo, status string) ([]*TronTopupTicket, int64, error) {
+	if pageInfo == nil {
+		return nil, 0, errors.New("page info is required")
+	}
+	page := pageInfo.GetPage()
+	pageSize := pageInfo.GetPageSize()
+	maxInt := int(^uint(0) >> 1)
+	if page < 1 || pageSize < 1 || pageSize > 100 || page-1 > maxInt/pageSize {
+		return nil, 0, errors.New("unsafe TRON ticket pagination")
+	}
+	offset := (page - 1) * pageSize
+	query := DB.Model(&TronTopupTicket{})
+	if status != "" {
+		if status != TronTicketStatusOpen && status != TronTicketStatusResolved && status != TronTicketStatusRejected {
+			return nil, 0, errors.New("invalid TRON ticket status")
+		}
+		query = query.Where("status = ?", status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var tickets []*TronTopupTicket
+	if err := query.Order("id DESC").Limit(pageSize).Offset(offset).Find(&tickets).Error; err != nil {
+		return nil, 0, err
+	}
+	return tickets, total, nil
+}
+
+func CountOpenTronTopupTickets() (int64, error) {
+	var count int64
+	err := DB.Model(&TronTopupTicket{}).Where("status = ?", TronTicketStatusOpen).Count(&count).Error
+	return count, err
+}
+
+func RejectTronTopupTicket(ticketID int64, resolverID int, note string, nowMS int64) error {
+	note = strings.TrimSpace(note)
+	if ticketID <= 0 || resolverID <= 0 || note == "" || len([]rune(note)) > 500 || nowMS <= 0 {
+		return errors.New("invalid TRON ticket rejection")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		ticket := TronTopupTicket{}
+		if err := lockForUpdate(tx).Where("id = ?", ticketID).First(&ticket).Error; err != nil {
+			return err
+		}
+		if ticket.Status == TronTicketStatusRejected {
+			return nil
+		}
+		if ticket.Status != TronTicketStatusOpen {
+			return ErrTronTicketNotOpen
+		}
+		ticket.Status = TronTicketStatusRejected
+		ticket.AdminNote = note
+		ticket.ResolverID = resolverID
+		ticket.ResolvedAtMS = nowMS
+		ticket.UpdatedAtMS = nowMS
+		return tx.Save(&ticket).Error
+	})
 }
 
 func GetActiveTronTopupOrderForUser(userID int, nowMS int64) (*TronTopupOrder, error) {
@@ -577,7 +677,7 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 		if err := lockForUpdate(tx).Where("id = ?", order.TopUpID).First(&topUp).Error; err != nil {
 			return err
 		}
-		if topUp.PaymentProvider != PaymentProviderTron || topUp.Status != common.TopUpStatusPending || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract || transfer.BlockTimestampMS < order.CreatedAtMS || transfer.BlockTimestampMS > order.ExpiresAtMS+tronClaimGracePeriodMS {
+		if topUp.PaymentProvider != PaymentProviderTron || topUp.Status != common.TopUpStatusPending || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract || transfer.BlockTimestampMS < order.CreatedAtMS || transfer.BlockTimestampMS > order.ExpiresAtMS+TronClaimGracePeriodMS {
 			return ErrTronTransferMismatch
 		}
 		approvedQuota, err := calculateTronClaimQuota(order.ExpectedAmountMicros, transfer.AmountMicros, order.CreditQuota)

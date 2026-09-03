@@ -57,6 +57,15 @@ type TronOrderView struct {
 	Status             string `json:"status"`
 }
 
+type TronTopupAdminStatus struct {
+	Enabled             bool   `json:"enabled"`
+	Network             string `json:"network"`
+	ReceiveAddress      string `json:"receive_address"`
+	CheckpointMS        int64  `json:"checkpoint_ms"`
+	CheckpointUpdatedMS int64  `json:"checkpoint_updated_ms"`
+	OpenTickets         int64  `json:"open_tickets"`
+}
+
 type tronTopupService struct {
 	config          TronTopupConfig
 	priceClient     TronPriceClient
@@ -68,8 +77,9 @@ type tronTopupService struct {
 }
 
 var (
-	defaultTronTopupServiceMu sync.RWMutex
-	defaultTronService        *tronTopupService
+	defaultTronTopupServiceMu           sync.RWMutex
+	defaultTronService                  *tronTopupService
+	ErrTronChainVerificationUnavailable = errors.New("TRON chain verification is unavailable")
 )
 
 func loadTronTopupConfig() (TronTopupConfig, error) {
@@ -137,7 +147,8 @@ func InitTronTopupService() error {
 	defaultTronTopupServiceMu.Lock()
 	defer defaultTronTopupServiceMu.Unlock()
 	if !config.Enabled {
-		defaultTronService = nil
+		config.Network = "mainnet"
+		defaultTronService = newTronTopupService(config, nil, nil, time.Now, nil)
 		return nil
 	}
 	baseClient := GetHttpClient()
@@ -178,7 +189,7 @@ func GetTronTopupPublicConfig() (TronTopupConfig, bool) {
 func GetDefaultTronTopupService() (*tronTopupService, error) {
 	defaultTronTopupServiceMu.RLock()
 	defer defaultTronTopupServiceMu.RUnlock()
-	if defaultTronService == nil || !defaultTronService.config.Enabled {
+	if defaultTronService == nil {
 		return nil, errors.New("TRON top-up is not enabled")
 	}
 	return defaultTronService, nil
@@ -263,4 +274,84 @@ func randomTronTail() (int64, error) {
 		return 0, err
 	}
 	return value.Int64() + 1, nil
+}
+
+func (s *tronTopupService) GetOrder(userID int, tradeNo string) (TronOrderView, error) {
+	tradeNo = strings.TrimSpace(tradeNo)
+	if userID <= 0 || tradeNo == "" || len(tradeNo) > 255 {
+		return TronOrderView{}, errors.New("invalid TRON top-up order query")
+	}
+	order, topUp, err := model.GetTronTopupOrderForUser(userID, tradeNo)
+	if err != nil {
+		return TronOrderView{}, err
+	}
+	status := topUp.Status
+	if status == common.TopUpStatusPending && s.now().UnixMilli() > order.ExpiresAtMS {
+		status = common.TopUpStatusExpired
+	}
+	return tronOrderView(order, status, s.config.Network), nil
+}
+
+func (s *tronTopupService) SubmitClaim(userID int, tradeNo string, txID string, note string) (*model.TronTopupTicket, error) {
+	return model.SubmitTronTopupClaim(userID, tradeNo, txID, note)
+}
+
+func (s *tronTopupService) ListTickets(pageInfo *common.PageInfo, status string) ([]*model.TronTopupTicket, int64, error) {
+	return model.ListTronTopupTickets(pageInfo, status)
+}
+
+func (s *tronTopupService) ResolveTicket(ctx context.Context, ticketID int64, orderID int64, resolverID int, note string) error {
+	if s.chainClient == nil {
+		return ErrTronChainVerificationUnavailable
+	}
+	ticket, err := model.GetTronTopupTicketByID(ticketID)
+	if err != nil {
+		return err
+	}
+	order, err := model.GetTronTopupOrderByID(orderID)
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	upperMS := now.Add(-s.config.IndexSafetyLag).UnixMilli()
+	claimUpperMS := order.ExpiresAtMS + model.TronClaimGracePeriodMS
+	if claimUpperMS < upperMS {
+		upperMS = claimUpperMS
+	}
+	if upperMS <= order.CreatedAtMS {
+		return errors.New("TRON transaction is not yet available for confirmed review")
+	}
+	transfers, err := s.chainClient.ConfirmedIncoming(ctx, order.CreatedAtMS, upperMS)
+	if err != nil {
+		return err
+	}
+	for _, transfer := range transfers {
+		if transfer.TxID != ticket.TxID {
+			continue
+		}
+		record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, ObservedAtMS: now.UnixMilli()}
+		return model.ResolveTronTopupTicket(ticketID, orderID, record, resolverID, note)
+	}
+	return errors.New("confirmed TRON transaction not found")
+}
+
+func (s *tronTopupService) RejectTicket(ticketID int64, resolverID int, note string) error {
+	return model.RejectTronTopupTicket(ticketID, resolverID, note, s.now().UnixMilli())
+}
+
+func (s *tronTopupService) AdminStatus() (TronTopupAdminStatus, error) {
+	checkpoint, err := model.GetTronScanCheckpoint(tronScanCheckpointName)
+	if err != nil {
+		return TronTopupAdminStatus{}, err
+	}
+	openTickets, err := model.CountOpenTronTopupTickets()
+	if err != nil {
+		return TronTopupAdminStatus{}, err
+	}
+	status := TronTopupAdminStatus{Enabled: s.config.Enabled, Network: s.config.Network, ReceiveAddress: s.config.ReceiveAddress, OpenTickets: openTickets}
+	if checkpoint != nil {
+		status.CheckpointMS = checkpoint.LastScannedMS
+		status.CheckpointUpdatedMS = checkpoint.UpdatedAtMS
+	}
+	return status, nil
 }

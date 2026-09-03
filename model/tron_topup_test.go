@@ -281,3 +281,34 @@ func TestRecordFailedTronSettlement_RejectsPreOrderTransferWithoutTicket(t *test
 	assert.Equal(t, int64(1), depositCount)
 	assert.Zero(t, ticketCount)
 }
+
+func TestManualCompleteTopUp_RejectsTronProvider(t *testing.T) {
+	truncateTables(t)
+	topUp, _ := createTronLedgerFixture(t, "TRON-no-legacy-complete", 8951, 12_000_001, 1_800_001_200_000)
+
+	err := ManualCompleteTopUp(topUp.TradeNo, "admin")
+	assert.ErrorIs(t, err, ErrPaymentMethodMismatch)
+	assert.Equal(t, 100, getUserQuotaForPaymentGuardTest(t, topUp.UserId))
+	assert.Equal(t, common.TopUpStatusPending, GetTopUpByTradeNo(topUp.TradeNo).Status)
+}
+
+func TestGetTronTopupOrderForUser_RejectsCrossUserLookup(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-private-order", 8961, 13_000_001, 1_800_001_200_000)
+
+	_, _, err := GetTronTopupOrderForUser(order.UserID+1, order.TradeNo)
+	assert.ErrorIs(t, err, ErrTronOrderNotFound)
+}
+
+func TestListTronTopupTickets_RejectsUnsafePagination(t *testing.T) {
+	for _, pageInfo := range []*common.PageInfo{
+		{Page: 0, PageSize: 10},
+		{Page: 1, PageSize: 0},
+		{Page: 1, PageSize: -1},
+		{Page: 1, PageSize: 101},
+		{Page: int(^uint(0) >> 1), PageSize: 100},
+	} {
+		_, _, err := ListTronTopupTickets(pageInfo, "")
+		assert.Error(t, err)
+	}
+}

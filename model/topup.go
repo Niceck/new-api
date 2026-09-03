@@ -340,6 +340,9 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
 			return errors.New("充值订单不存在")
 		}
+		if topUp.PaymentProvider == PaymentProviderTron {
+			return ErrPaymentMethodMismatch
+		}
 
 		// 幂等处理：已成功直接返回
 		if topUp.Status == common.TopUpStatusSuccess {

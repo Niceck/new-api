@@ -21,11 +21,13 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+var isTopupComplianceConfirmed = operation_setting.IsPaymentComplianceConfirmed
+
 func GetTopUpInfo(c *gin.Context) {
-	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	complianceConfirmed := isTopupComplianceConfirmed()
 
 	// 获取支付方式
-	payMethods := operation_setting.PayMethods
+	payMethods := append([]map[string]string(nil), operation_setting.PayMethods...)
 	if !complianceConfirmed {
 		payMethods = []map[string]string{}
 	}
@@ -95,12 +97,33 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	enableTron := false
+	if _, configured := getTronPublicConfig(); configured && complianceConfirmed {
+		enableTron = true
+		hasTron := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodTron {
+				hasTron = true
+				break
+			}
+		}
+		if !hasTron {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "USDT (TRON/TRC20)",
+				"type":      model.PaymentMethodTron,
+				"color":     "#EF0027",
+				"min_topup": strconv.FormatInt(getMinTopup(), 10),
+			})
+		}
+	}
+
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
 		"enable_creem_topup":               isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
+		"enable_tron_topup":                enableTron,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,

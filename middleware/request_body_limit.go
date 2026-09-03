@@ -10,8 +10,11 @@ import (
 )
 
 func AnonymousRequestBodyLimit() gin.HandlerFunc {
+	return RequestBodyLimit(common.GetAnonymousRequestBodyLimitBytes())
+}
+
+func RequestBodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		maxBytes := common.GetAnonymousRequestBodyLimitBytes()
 		if maxBytes <= 0 || c.Request.Body == nil {
 			c.Next()
 			return

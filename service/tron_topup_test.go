@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -215,4 +216,29 @@ func TestTronTopupService_CreateOrderFailsClosedOnPriceAndQuotaBounds(t *testing
 	var count int64
 	require.NoError(t, model.DB.Model(&model.TronTopupOrder{}).Count(&count).Error)
 	assert.Zero(t, count)
+}
+
+func TestTronTopupService_DisabledModeKeepsExistingOrderRecoveryAvailable(t *testing.T) {
+	truncate(t)
+	seedTronServiceUser(t, 9105)
+	now := time.UnixMilli(1_800_000_000_000)
+	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
+	enabled := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 700, nil })
+	order, err := enabled.CreateOrder(context.Background(), 9105, 100, decimal.NewFromInt(100), 100)
+	require.NoError(t, err)
+
+	disabledConfig := validTronTestConfig()
+	disabledConfig.Enabled = false
+	disabled := newTronTopupService(disabledConfig, nil, nil, func() time.Time { return now }, nil)
+	view, err := disabled.GetOrder(9105, order.TradeNo)
+	require.NoError(t, err)
+	assert.Equal(t, order.TradeNo, view.TradeNo)
+	ticket, err := disabled.SubmitClaim(9105, order.TradeNo, "3"+strings.Repeat("0", 63), "recovery while disabled")
+	require.NoError(t, err)
+	err = disabled.ResolveTicket(context.Background(), ticket.ID, 1, 1, "must verify chain")
+	assert.ErrorIs(t, err, ErrTronChainVerificationUnavailable)
+	assert.Equal(t, int64(0), getTronServiceUserQuota(t, 9105))
+	status, err := disabled.AdminStatus()
+	require.NoError(t, err)
+	assert.False(t, status.Enabled)
 }

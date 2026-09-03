@@ -18,6 +18,7 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
+	tronRequestBodyLimit := middleware.RequestBodyLimit(4096)
 	{
 		apiRouter.GET("/setup", controller.GetSetup)
 		apiRouter.POST("/setup", anonymousRequestBodyLimit, controller.PostSetup)
@@ -110,6 +111,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
 				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
+				selfRoute.POST("/tron/topup/orders", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("tron-topup-create"), tronRequestBodyLimit, middleware.DisableCache(), controller.CreateTronTopupOrder)
+				selfRoute.GET("/tron/topup/orders/:trade_no", middleware.DisableCache(), controller.GetTronTopupOrder)
+				selfRoute.POST("/tron/topup/claims", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("tron-topup-claim"), tronRequestBodyLimit, middleware.DisableCache(), controller.SubmitTronTopupClaim)
 				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
@@ -135,6 +139,10 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
+				adminRoute.GET("/tron/topup/tickets", middleware.DisableCache(), controller.AdminListTronTopupTickets)
+				adminRoute.POST("/tron/topup/tickets/:id/resolve", middleware.CriticalRateLimit(), tronRequestBodyLimit, middleware.DisableCache(), controller.AdminResolveTronTopupTicket)
+				adminRoute.POST("/tron/topup/tickets/:id/reject", middleware.CriticalRateLimit(), tronRequestBodyLimit, middleware.DisableCache(), controller.AdminRejectTronTopupTicket)
+				adminRoute.GET("/tron/topup/status", middleware.DisableCache(), controller.AdminGetTronTopupStatus)
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
 				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", controller.UnbindCustomOAuthByAdmin)

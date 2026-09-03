@@ -96,7 +96,7 @@ func (s *tronTopupService) ScanOnce(ctx context.Context) (TronScanSummary, error
 			summary.Unmatched++
 		}
 	}
-	if err := model.AdvanceTronScanCheckpoint(tronScanCheckpointName, toMS, toMS); err != nil {
+	if err := model.AdvanceTronScanCheckpoint(tronScanCheckpointName, toMS, nowMS); err != nil {
 		return TronScanSummary{}, err
 	}
 	if runWideReconciliation {
