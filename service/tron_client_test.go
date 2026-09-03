@@ -36,6 +36,21 @@ func TestCoinGeckoPriceClient_AcceptsFreshPositivePrice(t *testing.T) {
 	assert.Equal(t, now.Unix()-20, updatedAt.Unix())
 }
 
+func TestCoinGeckoPriceClient_AcceptsDemoCacheMaxAgeBoundary(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"tether":{"cny":7.25,"last_updated_at":%d}}`, now.Add(-6*time.Minute).Unix())
+	}))
+	defer server.Close()
+
+	client, err := newCoinGeckoPriceClient(server.Client(), server.URL, "demo-key", func() time.Time { return now })
+	require.NoError(t, err)
+	rate, updatedAt, err := client.USDTToCNY(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "7.25", rate.String())
+	assert.Equal(t, now.Add(-6*time.Minute).Unix(), updatedAt.Unix())
+}
+
 func TestCoinGeckoPriceClient_RejectsStaleMalformedAndNonPositivePrices(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	testCases := []struct {
@@ -43,7 +58,7 @@ func TestCoinGeckoPriceClient_RejectsStaleMalformedAndNonPositivePrices(t *testi
 		status int
 		body   string
 	}{
-		{name: "stale", status: http.StatusOK, body: fmt.Sprintf(`{"tether":{"cny":7.2,"last_updated_at":%d}}`, now.Unix()-121)},
+		{name: "stale", status: http.StatusOK, body: fmt.Sprintf(`{"tether":{"cny":7.2,"last_updated_at":%d}}`, now.Add(-6*time.Minute-time.Second).Unix())},
 		{name: "zero", status: http.StatusOK, body: fmt.Sprintf(`{"tether":{"cny":0,"last_updated_at":%d}}`, now.Unix())},
 		{name: "missing", status: http.StatusOK, body: `{}`},
 		{name: "malformed", status: http.StatusOK, body: `{`},

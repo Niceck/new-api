@@ -23,7 +23,7 @@ const (
 	tronUSDTDecimals       = 6
 	tronResponseMaxBytes   = 2 << 20
 	tronMaxPaginationPages = 20
-	tronPriceMaxAge        = 2 * time.Minute
+	tronPriceMaxAge        = 6 * time.Minute
 	tronRequestTimeout     = 10 * time.Second
 )
 
