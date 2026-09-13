@@ -26,97 +26,143 @@ type TronScanSummary struct {
 	Review    int `json:"review"`
 }
 
+const tronReconcileCheckpointName = "tron_usdt_mainnet_reconcile"
+
 func (s *tronTopupService) ScanOnce(ctx context.Context) (TronScanSummary, error) {
 	if !s.config.Enabled || s.chainClient == nil || s.now == nil {
 		return TronScanSummary{}, errors.New("TRON top-up scanner is unavailable")
 	}
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	nowMS := s.now().UnixMilli()
 	toMS := nowMS - s.config.IndexSafetyLag.Milliseconds()
 	if toMS <= 0 {
 		return TronScanSummary{}, errors.New("invalid TRON scan watermark")
 	}
-	checkpoint, err := model.GetTronScanCheckpoint(tronScanCheckpointName)
+	normal, err := model.BeginTronNormalScan(tronScanCheckpointName, toMS-s.config.InitialLookback.Milliseconds(), toMS, s.config.CheckpointOverlap.Milliseconds())
 	if err != nil {
 		return TronScanSummary{}, err
 	}
-	fromMS := toMS - s.config.InitialLookback.Milliseconds()
-	if checkpoint != nil {
-		fromMS = checkpoint.LastScannedMS - s.config.CheckpointOverlap.Milliseconds()
-		if fromMS < 0 {
-			fromMS = 0
-		}
-	}
-	runWideReconciliation := s.shouldRunWideReconciliation(nowMS)
-	if runWideReconciliation {
-		reconcileFromMS := toMS - s.config.ReconcileLookback.Milliseconds()
-		if reconcileFromMS < fromMS {
-			fromMS = reconcileFromMS
-			if fromMS < 0 {
-				fromMS = 0
-			}
-		}
-	}
-	transfers, err := s.chainClient.ConfirmedIncoming(ctx, fromMS, toMS)
+	summary := TronScanSummary{}
+	err = s.scanTronWindows(ctx, tronScanCheckpointName, normal.CursorMS+1, normal.WindowEndMS, &summary, func(throughMS int64) error {
+		return model.AdvanceTronNormalScan(tronScanCheckpointName, throughMS, s.now().UnixMilli())
+	})
 	if err != nil {
-		return TronScanSummary{}, err
+		return summary, err
 	}
+	wideFrom := toMS - s.config.ReconcileLookback.Milliseconds()
+	if wideFrom < 0 {
+		wideFrom = 0
+	}
+	wide, err := model.BeginTronReconciliation(tronReconcileCheckpointName, wideFrom, toMS, nowMS, s.config.ReconcileInterval.Milliseconds())
+	if err != nil {
+		return summary, err
+	}
+	if wide != nil {
+		err = s.scanTronWindows(ctx, tronReconcileCheckpointName, wide.LastScannedMS+1, wide.WindowEndMS, &summary, func(throughMS int64) error {
+			return model.AdvanceTronReconciliation(tronReconcileCheckpointName, throughMS, s.now().UnixMilli())
+		})
+	}
+	return summary, err
+}
 
-	summary := TronScanSummary{Seen: len(transfers)}
-	for _, transfer := range transfers {
-		record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, ObservedAtMS: nowMS}
-		result, settleErr := model.SettleTronDeposit(record, "tron-scanner")
-		if settleErr == nil {
-			if result.Credited && !result.AlreadyProcessed {
-				summary.Credited++
-			} else if result.NeedsReview && !result.AlreadyProcessed {
+// Windows are inclusive; only completed windows can advance durable progress.
+func (s *tronTopupService) scanTronWindows(ctx context.Context, progressName string, fromMS, toMS int64, summary *TronScanSummary, advance func(int64) error) error {
+	if fromMS > toMS {
+		return errors.New("TRON scan checkpoint is ahead of safe watermark")
+	}
+	progress, err := model.GetTronScanCheckpoint(progressName)
+	if err != nil {
+		return err
+	}
+	spanMS := int64(900000)
+	if progress != nil && progress.WindowSpanMS > 0 && progress.WindowSpanMS < spanMS {
+		spanMS = progress.WindowSpanMS
+	}
+	for fromMS <= toMS {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		endMS := fromMS + spanMS - 1
+		if endMS > toMS {
+			endMS = toMS
+		}
+		var transfers []TronTransfer
+		for {
+			var err error
+			windowCtx, cancelWindow := context.WithTimeout(ctx, s.windowTimeout)
+			transfers, err = s.chainClient.ConfirmedIncoming(windowCtx, fromMS, endMS)
+			cancelWindow()
+			if (errors.Is(err, ErrTronPaginationLimit) || errors.Is(err, context.DeadlineExceeded)) && ctx.Err() == nil && endMS > fromMS {
+				endMS = fromMS + (endMS-fromMS)/2
+				spanMS = endMS - fromMS + 1
+				if err := model.SetTronScanWindowSpan(progressName, fromMS, spanMS); err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			break
+		}
+		for _, transfer := range transfers {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if transfer.BlockTimestampMS < fromMS || transfer.BlockTimestampMS > endMS {
+				return errors.New("TRON transfer outside completed window")
+			}
+			summary.Seen++
+			record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, ObservedAtMS: s.now().UnixMilli(), SourceAddresses: transfer.SourceAddresses}
+			result, err := model.SettleTronDeposit(record, "tron-scanner")
+			if err == nil {
+				if result.Credited && !result.AlreadyProcessed {
+					summary.Credited++
+				}
+				if result.NeedsReview && !result.AlreadyProcessed {
+					summary.Review++
+				}
+				continue
+			}
+			if errors.Is(err, model.ErrTronOrderNotFound) || errors.Is(err, model.ErrTronTransferPredatesOrder) {
+				deposit, err := model.RecordUnmatchedTronDeposit(record)
+				if err != nil {
+					return err
+				}
+				if deposit.Status == model.TronDepositStatusUnmatched {
+					summary.Unmatched++
+				}
+				continue
+			}
+			if !errors.Is(err, model.ErrTronCreditReviewRequired) {
+				return err
+			}
+			review, err := model.RecordFailedTronSettlement(record)
+			if err != nil {
+				return fmt.Errorf("record TRON review: %w", err)
+			}
+			if review {
 				summary.Review++
 			}
-			continue
 		}
-		if errors.Is(settleErr, model.ErrTronOrderNotFound) || errors.Is(settleErr, model.ErrTronTransferPredatesOrder) {
-			deposit, err := model.RecordUnmatchedTronDeposit(record)
-			if err != nil {
-				return TronScanSummary{}, err
+		if err := advance(endMS); err != nil {
+			return err
+		}
+		if spanMS < 900000 {
+			spanMS *= 2
+			if spanMS > 900000 {
+				spanMS = 900000
 			}
-			if deposit.Status == model.TronDepositStatusUnmatched {
-				summary.Unmatched++
+			if err := model.SetTronScanWindowSpan(progressName, fromMS, spanMS); err != nil {
+				return err
 			}
-			continue
 		}
-		if !errors.Is(settleErr, model.ErrTronCreditReviewRequired) {
-			return TronScanSummary{}, settleErr
-		}
-		needsReview, err := model.RecordFailedTronSettlement(record)
-		if err != nil {
-			return TronScanSummary{}, fmt.Errorf("record failed TRON settlement: %w", err)
-		}
-		if needsReview {
-			summary.Review++
-		} else {
-			summary.Unmatched++
-		}
+		fromMS = endMS + 1
 	}
-	if err := model.AdvanceTronScanCheckpoint(tronScanCheckpointName, toMS, nowMS); err != nil {
-		return TronScanSummary{}, err
-	}
-	if runWideReconciliation {
-		s.markWideReconciliationComplete(nowMS)
-	}
-	return summary, nil
-}
-
-func (s *tronTopupService) shouldRunWideReconciliation(nowMS int64) bool {
-	s.reconcileMu.Lock()
-	defer s.reconcileMu.Unlock()
-	return s.lastReconcileMS == 0 || nowMS-s.lastReconcileMS >= s.config.ReconcileInterval.Milliseconds()
-}
-
-func (s *tronTopupService) markWideReconciliationComplete(nowMS int64) {
-	s.reconcileMu.Lock()
-	defer s.reconcileMu.Unlock()
-	if nowMS > s.lastReconcileMS {
-		s.lastReconcileMS = nowMS
-	}
+	return nil
 }
 
 func shouldStartTronScanner(isMaster bool, config TronTopupConfig) bool {

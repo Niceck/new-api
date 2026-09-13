@@ -5298,6 +5298,11 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Payment deadline passed. You can still check for credit.": "Le délai de paiement est passé. Vous pouvez encore vérifier le crédit.",
+    "Refresh payment status": "Actualiser le paiement",
+    "Unable to refresh payment status": "Impossible d’actualiser le paiement",
+    "Payment details and claim": "Détails du paiement et réclamation",
+    "Claim period ended. Contact support for help.": "Le délai de réclamation est passé. Contactez l’assistance."
   }
 }

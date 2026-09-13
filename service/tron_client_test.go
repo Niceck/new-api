@@ -84,6 +84,14 @@ func TestCoinGeckoPriceClient_RejectsStaleMalformedAndNonPositivePrices(t *testi
 func TestTronGridClient_UsesFixedFiltersPaginatesAndGroupsByTxID(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/walletsolidity/gettransactioninfobyid" {
+			destination, err := decodeTronBase58("TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f")
+			require.NoError(t, err)
+			contract, err := decodeTronBase58(tronUSDTContract)
+			require.NoError(t, err)
+			_, _ = fmt.Fprintf(w, `{"id":"%s","blockTimeStamp":1500,"receipt":{"result":"SUCCESS"},"log":[{"address":"%x","topics":["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","%064x","%064x"],"data":"%064x"}]}`, strings.Repeat("a", 64), contract[1:21], 1, destination[1:21], 3000000)
+			return
+		}
 		requests.Add(1)
 		assert.Equal(t, "/v1/accounts/TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f/transactions/trc20", r.URL.Path)
 		assert.Equal(t, "true", r.URL.Query().Get("only_confirmed"))

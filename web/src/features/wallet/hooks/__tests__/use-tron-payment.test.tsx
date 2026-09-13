@@ -229,4 +229,45 @@ describe('useTronPayment', () => {
     assert.equal(successCalls, 0)
     await act(async () => root.unmount())
   })
+  test('keeps checking expired orders until a late credit arrives', async () => {
+    let callback: (() => void | Promise<void>) | undefined
+    const delays: number[] = []
+    let latest: ReturnType<typeof useTronPayment> | undefined
+    const expired = {
+      ...pendingOrder,
+      status: 'expired' as const,
+      expires_at_ms: Date.now() - 60_000,
+    }
+    const dependencies = {
+      createOrder: async () => ({ success: true, data: expired }),
+      getOrder: async () => ({
+        success: true,
+        data: { ...expired, status: 'success' as const },
+      }),
+      submitClaim: async () => ({ success: true, data: { id: 1 } }),
+      schedule: (next: () => void | Promise<void>, delay: number) => {
+        callback = next
+        delays.push(delay)
+        return 1
+      },
+      cancelSchedule: () => undefined,
+      pollDelayMS: 5_000,
+    }
+    function Harness() {
+      latest = useTronPayment({ dependencies })
+      return null
+    }
+    const root = createRoot(document.createElement('div'))
+    await act(async () => root.render(<Harness />))
+    await act(async () => {
+      await latest?.startPayment(100)
+    })
+    assert.ok(callback, 'expiry must not stop settlement checks')
+    assert.equal(delays.at(-1), 30_000)
+    await act(async () => {
+      await callback?.()
+    })
+    assert.equal(latest?.order?.status, 'success')
+    await act(async () => root.unmount())
+  })
 })

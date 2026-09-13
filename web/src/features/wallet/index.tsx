@@ -395,9 +395,12 @@ export function Wallet(props: WalletProps) {
         onOpenChange={tronPayment.onOpenChange}
         onSubmitClaim={tronPayment.submitClaim}
         claiming={tronPayment.claiming}
+        onRefresh={tronPayment.refreshOrder}
+        refreshing={tronPayment.processing}
       />
 
       <BillingHistoryDialog
+        onOpenTronOrder={tronPayment.resumeOrder}
         open={billingDialogOpen}
         onOpenChange={setBillingDialogOpen}
       />

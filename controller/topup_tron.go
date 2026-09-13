@@ -232,3 +232,15 @@ func AdminGetTronTopupStatus(c *gin.Context) {
 	}
 	common.ApiSuccess(c, status)
 }
+
+func AdminListTronDeposits(c *gin.Context) {
+	page := common.GetPageQuery(c)
+	deposits, total, err := model.ListTronDeposits(page, strings.TrimSpace(c.Query("status")))
+	if err != nil {
+		common.ApiErrorMsg(c, "查询 TRON 收款记录失败")
+		return
+	}
+	page.SetTotal(int(total))
+	page.SetItems(deposits)
+	common.ApiSuccess(c, page)
+}

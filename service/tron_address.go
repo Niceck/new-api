@@ -62,3 +62,27 @@ func decodeTronBase58(value string) ([]byte, error) {
 	copy(withZeros[leadingZeros:], result)
 	return withZeros, nil
 }
+
+func encodeTronAddress(payload []byte) string {
+	first := sha256.Sum256(payload)
+	second := sha256.Sum256(first[:])
+	data := append(append([]byte{}, payload...), second[:4]...)
+	value := new(big.Int).SetBytes(data)
+	base := big.NewInt(58)
+	remainder := new(big.Int)
+	var out []byte
+	for value.Sign() > 0 {
+		value.QuoRem(value, base, remainder)
+		out = append(out, tronBase58Alphabet[remainder.Int64()])
+	}
+	for _, b := range data {
+		if b != 0 {
+			break
+		}
+		out = append(out, tronBase58Alphabet[0])
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return string(out)
+}

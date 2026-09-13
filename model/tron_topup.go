@@ -30,6 +30,8 @@ type TronTopupOrder struct {
 }
 
 type TronDeposit struct {
+	ReviewReason     string `json:"review_reason" gorm:"type:varchar(64)"`
+	SourceAddresses  string `json:"source_addresses,omitempty" gorm:"type:text"`
 	ID               int64  `json:"id" gorm:"primaryKey"`
 	TxID             string `json:"tx_id" gorm:"type:char(64);uniqueIndex"`
 	BlockTimestampMS int64  `json:"block_timestamp_ms" gorm:"type:bigint;index"`
@@ -63,12 +65,18 @@ type TronTopupTicket struct {
 }
 
 type TronScanCheckpoint struct {
+	CursorMS      int64  `json:"cursor_ms" gorm:"type:bigint"`
+	WindowSpanMS  int64  `json:"window_span_ms" gorm:"type:bigint"`
+	WindowStartMS int64  `json:"window_start_ms" gorm:"type:bigint"`
+	WindowEndMS   int64  `json:"window_end_ms" gorm:"type:bigint"`
+	CompletedAtMS int64  `json:"completed_at_ms" gorm:"type:bigint"`
 	Name          string `json:"name" gorm:"type:varchar(64);primaryKey"`
 	LastScannedMS int64  `json:"last_scanned_ms" gorm:"type:bigint"`
 	UpdatedAtMS   int64  `json:"updated_at_ms" gorm:"type:bigint"`
 }
 
 type TronTransferRecord struct {
+	SourceAddresses  string
 	TxID             string
 	BlockTimestampMS int64
 	FromAddress      string
@@ -433,6 +441,9 @@ func SettleTronDeposit(transfer TronTransferRecord, callerIP string) (TronSettle
 		return TronSettlementResult{}, err
 	}
 	transfer = normalized
+	if transfer.SourceAddresses != "" {
+		return RecordReviewTronDeposit(transfer, "multiple_senders")
+	}
 	result := TronSettlementResult{}
 	var userID int
 	var creditedQuota int
@@ -472,6 +483,15 @@ func SettleTronDeposit(transfer TronTransferRecord, callerIP string) (TronSettle
 		if err := lockForUpdate(tx).Where("id = ?", order.TopUpID).First(&topUp).Error; err != nil {
 			return err
 		}
+		if topUp.Status == common.TopUpStatusSuccess && topUp.PaymentProvider == PaymentProviderTron && topUp.PaymentMethod == PaymentMethodTron && topUp.UserId == order.UserID && topUp.TradeNo == order.TradeNo && transfer.ToAddress == order.ReceiveAddress && transfer.TokenContract == order.TokenContract && transfer.BlockTimestampMS >= order.CreatedAtMS {
+			deposit := TronDeposit{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.FromAddress, ToAddress: transfer.ToAddress, TokenContract: transfer.TokenContract, AmountMicros: transfer.AmountMicros, Status: TronDepositStatusReview, ReviewReason: "duplicate_payment", ObservedAtMS: transfer.ObservedAtMS}
+			if err := tx.Create(&deposit).Error; err != nil {
+				return err
+			}
+			result.DepositID = deposit.ID
+			result.NeedsReview = true
+			return nil
+		}
 		if err := validateTronOrderTransfer(&topUp, &order, transfer); err != nil {
 			return err
 		}
@@ -491,6 +511,7 @@ func SettleTronDeposit(transfer TronTransferRecord, callerIP string) (TronSettle
 			OrderID:          &orderID,
 			Status:           depositStatus,
 			ObservedAtMS:     transfer.ObservedAtMS,
+			SourceAddresses:  transfer.SourceAddresses,
 		}
 		if err := tx.Create(&deposit).Error; err != nil {
 			return err
@@ -554,6 +575,7 @@ func RecordUnmatchedTronDeposit(transfer TronTransferRecord) (*TronDeposit, erro
 		AmountMicros:     transfer.AmountMicros,
 		Status:           TronDepositStatusUnmatched,
 		ObservedAtMS:     transfer.ObservedAtMS,
+		SourceAddresses:  transfer.SourceAddresses,
 	}
 	createErr := DB.Create(&deposit).Error
 	if createErr == nil {
@@ -729,7 +751,7 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 		err = lockForUpdate(tx).Where("tx_id = ?", transfer.TxID).First(&deposit).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			orderID := order.ID
-			deposit = TronDeposit{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.FromAddress, ToAddress: transfer.ToAddress, TokenContract: transfer.TokenContract, AmountMicros: transfer.AmountMicros, OrderID: &orderID, Status: TronDepositStatusReview, ObservedAtMS: transfer.ObservedAtMS}
+			deposit = TronDeposit{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.FromAddress, ToAddress: transfer.ToAddress, TokenContract: transfer.TokenContract, AmountMicros: transfer.AmountMicros, OrderID: &orderID, Status: TronDepositStatusReview, ObservedAtMS: transfer.ObservedAtMS, SourceAddresses: transfer.SourceAddresses}
 			if err := tx.Create(&deposit).Error; err != nil {
 				return err
 			}
@@ -744,6 +766,7 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 			}
 			orderID := order.ID
 			deposit.OrderID = &orderID
+			deposit.SourceAddresses = transfer.SourceAddresses
 		}
 
 		credited, _, err := creditTronOrderTx(tx, &topUp, &order, &deposit, approvedQuota, transfer.ObservedAtMS)
@@ -818,11 +841,14 @@ func validateTronOrderTransfer(topUp *TopUp, order *TronTopupOrder, transfer Tro
 	if topUp.PaymentProvider != PaymentProviderTron || topUp.PaymentMethod != PaymentMethodTron {
 		return ErrPaymentMethodMismatch
 	}
-	if topUp.Status != common.TopUpStatusPending || topUp.UserId != order.UserID || topUp.TradeNo != order.TradeNo {
+	if topUp.UserId != order.UserID || topUp.TradeNo != order.TradeNo {
 		return ErrTopUpStatusInvalid
 	}
 	if transfer.BlockTimestampMS < order.CreatedAtMS {
 		return ErrTronTransferPredatesOrder
+	}
+	if topUp.Status != common.TopUpStatusPending {
+		return ErrTopUpStatusInvalid
 	}
 	if transfer.AmountMicros != order.ExpectedAmountMicros || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract {
 		return ErrTronTransferMismatch
@@ -839,7 +865,7 @@ func normalizeTronTransferRecord(transfer TronTransferRecord) (TronTransferRecor
 }
 
 func sameTronTransfer(deposit *TronDeposit, transfer TronTransferRecord) bool {
-	return deposit.TxID == transfer.TxID && deposit.BlockTimestampMS == transfer.BlockTimestampMS && deposit.FromAddress == transfer.FromAddress && deposit.ToAddress == transfer.ToAddress && deposit.TokenContract == transfer.TokenContract && deposit.AmountMicros == transfer.AmountMicros
+	return (deposit.SourceAddresses == "" || deposit.SourceAddresses == transfer.SourceAddresses) && deposit.TxID == transfer.TxID && deposit.BlockTimestampMS == transfer.BlockTimestampMS && deposit.FromAddress == transfer.FromAddress && deposit.ToAddress == transfer.ToAddress && deposit.TokenContract == transfer.TokenContract && deposit.AmountMicros == transfer.AmountMicros
 }
 
 func calculateTronClaimQuota(expectedMicros int64, actualMicros int64, creditQuota int) (int, error) {

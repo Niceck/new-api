@@ -2,14 +2,17 @@ package service
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +30,8 @@ const (
 	tronRequestTimeout     = 10 * time.Second
 )
 
+var ErrTronPaginationLimit = errors.New("TronGrid pagination limit exceeded")
+
 var tronTxIDPattern = regexp.MustCompile(`\A[0-9a-fA-F]{64}\z`)
 
 type TronPriceClient interface {
@@ -38,6 +43,7 @@ type TronChainClient interface {
 }
 
 type TronTransfer struct {
+	SourceAddresses  string
 	TxID             string
 	BlockTimestampMS int64
 	From             string
@@ -154,12 +160,10 @@ func newTronGridClient(httpClient *http.Client, baseURL string, receiveAddress s
 }
 
 func (c *tronGridClient) ConfirmedIncoming(ctx context.Context, fromMS, toMS int64) ([]TronTransfer, error) {
-	if fromMS < 0 || toMS <= fromMS {
+	if fromMS < 0 || toMS < fromMS {
 		return nil, errors.New("invalid TRON scan window")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
-	defer cancel()
 	grouped := make(map[string]*TronTransfer)
 	order := make([]string, 0)
 	fingerprint := ""
@@ -177,27 +181,26 @@ func (c *tronGridClient) ConfirmedIncoming(ctx context.Context, fromMS, toMS int
 			if transfer.BlockTimestampMS < fromMS || transfer.BlockTimestampMS > toMS {
 				return nil, errors.New("TronGrid transfer is outside requested window")
 			}
-			existing := grouped[transfer.TxID]
-			if existing == nil {
-				copyOfTransfer := transfer
-				grouped[transfer.TxID] = &copyOfTransfer
-				order = append(order, transfer.TxID)
+			if transfer.AmountMicros == 0 {
 				continue
 			}
-			if existing.BlockTimestampMS != transfer.BlockTimestampMS || existing.From != transfer.From || existing.To != transfer.To {
-				return nil, errors.New("inconsistent transfer rows for transaction")
+			if _, exists := grouped[transfer.TxID]; !exists {
+				grouped[transfer.TxID] = nil
+				order = append(order, transfer.TxID)
 			}
-			if transfer.AmountMicros > math.MaxInt64-existing.AmountMicros {
-				return nil, errors.New("TRON transfer amount overflow")
-			}
-			existing.AmountMicros += transfer.AmountMicros
 		}
 
 		nextFingerprint := payload.Meta.Fingerprint
 		if nextFingerprint == "" {
 			transfers := make([]TronTransfer, 0, len(order))
 			for _, txID := range order {
-				transfers = append(transfers, *grouped[txID])
+				verified, err := c.confirmedReceipt(ctx, txID, fromMS, toMS)
+				if err != nil {
+					return nil, err
+				}
+				if verified != nil {
+					transfers = append(transfers, *verified)
+				}
 			}
 			return transfers, nil
 		}
@@ -210,7 +213,7 @@ func (c *tronGridClient) ConfirmedIncoming(ctx context.Context, fromMS, toMS int
 		seenFingerprints[nextFingerprint] = struct{}{}
 		fingerprint = nextFingerprint
 	}
-	return nil, errors.New("TronGrid pagination limit exceeded")
+	return nil, ErrTronPaginationLimit
 }
 
 type tronGridResponse struct {
@@ -240,6 +243,8 @@ type tronGridTokenInfo struct {
 }
 
 func (c *tronGridClient) fetchTransferPage(ctx context.Context, fromMS, toMS int64, fingerprint string) (tronGridResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
+	defer cancel()
 	params := url.Values{}
 	params.Set("only_confirmed", "true")
 	params.Set("only_to", "true")
@@ -292,7 +297,7 @@ func (c *tronGridClient) parseTransfer(row tronGridRow) (TronTransfer, error) {
 		return TronTransfer{}, errors.New("invalid TRON token identity")
 	}
 	amount, err := strconv.ParseInt(row.Value, 10, 64)
-	if err != nil || amount <= 0 {
+	if err != nil || amount < 0 {
 		return TronTransfer{}, errors.New("invalid TRON transfer amount")
 	}
 	return TronTransfer{TxID: strings.ToLower(row.TransactionID), BlockTimestampMS: row.BlockTimeMS, From: row.From, To: row.To, AmountMicros: amount}, nil
@@ -338,4 +343,109 @@ func decodeTronJSON(reader io.Reader, target any) error {
 		return errors.New("external API response is too large")
 	}
 	return common.Unmarshal(body, target)
+}
+
+// Account history discovers candidates; only a solidified execution receipt
+// determines the money. Each log index is visited exactly once.
+func (c *tronGridClient) confirmedReceipt(ctx context.Context, txID string, fromMS, toMS int64) (*TronTransfer, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/walletsolidity/gettransactioninfobyid", strings.NewReader(`{"value":"`+txID+`"}`))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("TRON-PRO-API-KEY", c.apiKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, statusAPIError(resp.StatusCode)
+	}
+	var receipt struct {
+		ID        string `json:"id"`
+		BlockTime int64  `json:"blockTimeStamp"`
+		Receipt   struct {
+			Result string `json:"result"`
+		} `json:"receipt"`
+		Logs []struct {
+			Address string   `json:"address"`
+			Topics  []string `json:"topics"`
+			Data    string   `json:"data"`
+		} `json:"log"`
+	}
+	if err := decodeTronJSON(resp.Body, &receipt); err != nil {
+		return nil, errors.New("invalid TRON receipt")
+	}
+	if strings.ToLower(receipt.ID) != txID || receipt.BlockTime < fromMS || receipt.BlockTime > toMS {
+		return nil, errors.New("solidified TRON receipt identity unavailable")
+	}
+	if receipt.Receipt.Result == "" {
+		return nil, errors.New("TRON receipt execution status unavailable")
+	}
+	if receipt.Receipt.Result != "SUCCESS" {
+		return nil, nil
+	}
+	contract, _ := decodeTronBase58(tronUSDTContract)
+	destination, _ := decodeTronBase58(c.receiveAddress)
+	contractHex := hex.EncodeToString(contract[1:21])
+	destinationHex := hex.EncodeToString(destination[1:21])
+	transfer := &TronTransfer{TxID: txID, BlockTimestampMS: receipt.BlockTime, To: c.receiveAddress}
+	senders := map[string]bool{}
+	for _, event := range receipt.Logs {
+		address := strings.ToLower(event.Address)
+		if len(address) == 42 && strings.HasPrefix(address, "41") {
+			address = address[2:]
+		}
+		if address != contractHex || len(event.Topics) == 0 || strings.ToLower(event.Topics[0]) != "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" {
+			continue
+		}
+		if len(event.Topics) != 3 {
+			return nil, errors.New("invalid USDT receipt topics")
+		}
+		to := strings.ToLower(event.Topics[2])
+		from := strings.ToLower(event.Topics[1])
+		if len(to) != 64 || len(from) != 64 || to[:24] != strings.Repeat("0", 24) || from[:24] != strings.Repeat("0", 24) {
+			return nil, errors.New("invalid USDT receipt addresses")
+		}
+		if to[24:] != destinationHex {
+			continue
+		}
+		source, err := hex.DecodeString("41" + from[24:])
+		if err != nil {
+			return nil, errors.New("invalid USDT sender")
+		}
+		if len(event.Data) != 64 {
+			return nil, errors.New("invalid USDT receipt value")
+		}
+		value, ok := new(big.Int).SetString(event.Data, 16)
+		if !ok || value.Sign() < 0 || !value.IsInt64() || value.Int64() > math.MaxInt64-transfer.AmountMicros {
+			return nil, errors.New("USDT receipt amount overflow")
+		}
+		if value.Sign() == 0 {
+			continue
+		}
+		transfer.AmountMicros += value.Int64()
+		senders[encodeTronAddress(source)] = true
+	}
+	if transfer.AmountMicros == 0 {
+		return nil, nil
+	}
+	sources := make([]string, 0, len(senders))
+	for source := range senders {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	transfer.From = sources[0]
+	if len(sources) > 1 {
+		transfer.From = "multiple"
+		encoded, err := common.Marshal(sources)
+		if err != nil {
+			return nil, err
+		}
+		transfer.SourceAddresses = string(encoded)
+	}
+	return transfer, nil
 }

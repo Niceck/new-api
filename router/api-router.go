@@ -143,6 +143,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.POST("/tron/topup/tickets/:id/resolve", middleware.CriticalRateLimit(), tronRequestBodyLimit, middleware.DisableCache(), controller.AdminResolveTronTopupTicket)
 				adminRoute.POST("/tron/topup/tickets/:id/reject", middleware.CriticalRateLimit(), tronRequestBodyLimit, middleware.DisableCache(), controller.AdminRejectTronTopupTicket)
 				adminRoute.GET("/tron/topup/status", middleware.DisableCache(), controller.AdminGetTronTopupStatus)
+				adminRoute.GET("/tron/topup/deposits", middleware.DisableCache(), controller.AdminListTronDeposits)
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
 				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", controller.UnbindCustomOAuthByAdmin)

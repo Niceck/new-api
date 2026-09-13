@@ -5298,6 +5298,11 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Payment deadline passed. You can still check for credit.": "Đã hết hạn thanh toán. Bạn vẫn có thể kiểm tra ghi có.",
+    "Refresh payment status": "Làm mới trạng thái thanh toán",
+    "Unable to refresh payment status": "Không thể làm mới trạng thái thanh toán",
+    "Payment details and claim": "Chi tiết thanh toán và khiếu nại",
+    "Claim period ended. Contact support for help.": "Đã hết hạn khiếu nại. Vui lòng liên hệ hỗ trợ."
   }
 }

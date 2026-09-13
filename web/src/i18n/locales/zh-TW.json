@@ -5298,6 +5298,11 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Payment deadline passed. You can still check for credit.": "付款期限已過，仍可查詢入帳。",
+    "Refresh payment status": "重新整理入帳狀態",
+    "Unable to refresh payment status": "無法重新整理入帳狀態",
+    "Payment details and claim": "付款詳情與申訴",
+    "Claim period ended. Contact support for help.": "申訴期限已過，請聯絡客服協助。"
   }
 }

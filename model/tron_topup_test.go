@@ -506,3 +506,42 @@ func TestListTronTopupTickets_RejectsUnsafePagination(t *testing.T) {
 		assert.Error(t, err)
 	}
 }
+
+func TestSettleTronDeposit_SecondPaymentAfterSuccessIsIsolated(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-repeat-payment", 8901, 1_000_123, 1_800_001_200_000)
+	first := tronTransfer("a", order.ExpectedAmountMicros, order.CreatedAtMS+1000)
+	_, err := SettleTronDeposit(first, "test")
+	require.NoError(t, err)
+	second := tronTransfer("b", order.ExpectedAmountMicros, order.CreatedAtMS+2000)
+	result, err := SettleTronDeposit(second, "test")
+	require.NoError(t, err)
+	assert.True(t, result.NeedsReview)
+	assert.False(t, result.Credited)
+	var user User
+	require.NoError(t, DB.First(&user, order.UserID).Error)
+	assert.Equal(t, 100+order.CreditQuota, user.Quota)
+	replay, err := SettleTronDeposit(second, "test")
+	require.NoError(t, err)
+	assert.True(t, replay.AlreadyProcessed)
+}
+
+func TestTronReview_MultipleSourcesPreservedWhenAdminSettlesBeforeScanner(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-multi-review", 8902, 1_000_123, 1_800_001_200_000)
+	transfer := tronTransfer("c", order.ExpectedAmountMicros, order.CreatedAtMS+1000)
+	transfer.FromAddress = "multiple"
+	transfer.SourceAddresses = `["source-one","source-two"]`
+	ticket, err := submitTronTopupClaimAt(order.UserID, order.TradeNo, transfer.TxID, "verified sources", order.CreatedAtMS+2000)
+	require.NoError(t, err)
+	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "all sender ownership verified"))
+	var deposit TronDeposit
+	require.NoError(t, DB.Where("tx_id = ?", transfer.TxID).First(&deposit).Error)
+	assert.Equal(t, transfer.SourceAddresses, deposit.SourceAddresses)
+	result, err := SettleTronDeposit(transfer, "scanner")
+	require.NoError(t, err)
+	assert.True(t, result.AlreadyProcessed)
+	transfer.SourceAddresses = `["different"]`
+	_, err = SettleTronDeposit(transfer, "scanner")
+	require.ErrorIs(t, err, ErrTronTransferMismatch)
+}

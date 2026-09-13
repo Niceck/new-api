@@ -5298,6 +5298,11 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Payment deadline passed. You can still check for credit.": "支払期限が過ぎました。入金状況は引き続き確認できます。",
+    "Refresh payment status": "入金状況を更新",
+    "Unable to refresh payment status": "入金状況を更新できません",
+    "Payment details and claim": "支払い詳細・お問い合わせ",
+    "Claim period ended. Contact support for help.": "申請期限が過ぎました。サポートにご連絡ください。"
   }
 }

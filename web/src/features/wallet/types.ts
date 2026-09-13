@@ -73,6 +73,9 @@ export interface TronTopupOrder {
   expires_at_ms: number
   credit_quota: number
   status: TronTopupStatus
+  claim_deadline_ms?: number
+  can_claim?: boolean
+  review_status?: string
 }
 
 export interface TronTopupTicket {

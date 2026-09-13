@@ -40,7 +40,13 @@ func (s *stubTronChainClient) ConfirmedIncoming(_ context.Context, fromMS, toMS 
 	s.calls++
 	s.fromMS = fromMS
 	s.toMS = toMS
-	return s.transfers, s.err
+	var filtered []TronTransfer
+	for _, transfer := range s.transfers {
+		if transfer.BlockTimestampMS >= fromMS && transfer.BlockTimestampMS <= toMS {
+			filtered = append(filtered, transfer)
+		}
+	}
+	return filtered, s.err
 }
 
 func validTronTestConfig() TronTopupConfig {
@@ -112,7 +118,7 @@ func TestTronTopupService_CreateOrderLocksFreshRateAndReusesActiveOrder(t *testi
 	now := time.UnixMilli(1_800_000_000_000)
 	price := &stubTronPriceClient{rate: decimal.RequireFromString("7.25"), updatedAt: now.Add(-20 * time.Second)}
 	probeSeeds := []int64{1234}
-	service := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) {
+	service := newTronTestService(t, validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) {
 		seed := probeSeeds[0]
 		probeSeeds = probeSeeds[1:]
 		return seed, nil
@@ -164,7 +170,7 @@ func TestTronTopupService_ConcurrentSameUserCreateReturnsOneActiveOrder(t *testi
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
 	var nextProbeSeed atomic.Int64
 	nextProbeSeed.Store(100)
-	service := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) {
+	service := newTronTestService(t, validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) {
 		return nextProbeSeed.Add(1), nil
 	})
 
@@ -205,7 +211,7 @@ func TestTronTopupService_CreateOrderRetriesAmountCollision(t *testing.T) {
 	seedTronServiceUser(t, 9102)
 	now := time.UnixMilli(1_800_000_000_000)
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
-	service := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 100, nil })
+	service := newTronTestService(t, validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 100, nil })
 
 	first, err := service.CreateOrder(context.Background(), 9102, 100, decimal.NewFromInt(100), 100)
 	require.NoError(t, err)
@@ -242,7 +248,7 @@ func TestTronTopupService_CreateOrderFailsClosedOnPriceAndQuotaBounds(t *testing
 	seedTronServiceUser(t, 9103)
 	now := time.UnixMilli(1_800_000_000_000)
 	price := &stubTronPriceClient{err: errors.New("price unavailable")}
-	service := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 1, nil })
+	service := newTronTestService(t, validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 1, nil })
 
 	_, err := service.CreateOrder(context.Background(), 9103, 100, decimal.NewFromInt(100), 100)
 	assert.Error(t, err)
@@ -261,13 +267,13 @@ func TestTronTopupService_DisabledModeKeepsExistingOrderRecoveryAvailable(t *tes
 	seedTronServiceUser(t, 9105)
 	now := time.UnixMilli(1_800_000_000_000)
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
-	enabled := newTronTopupService(validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 700, nil })
+	enabled := newTronTestService(t, validTronTestConfig(), price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 700, nil })
 	order, err := enabled.CreateOrder(context.Background(), 9105, 100, decimal.NewFromInt(100), 100)
 	require.NoError(t, err)
 
 	disabledConfig := validTronTestConfig()
 	disabledConfig.Enabled = false
-	disabled := newTronTopupService(disabledConfig, nil, nil, func() time.Time { return now }, nil)
+	disabled := newTronTestService(t, disabledConfig, nil, nil, func() time.Time { return now }, nil)
 	view, err := disabled.GetOrder(9105, order.TradeNo)
 	require.NoError(t, err)
 	assert.Equal(t, order.TradeNo, view.TradeNo)
@@ -279,4 +285,10 @@ func TestTronTopupService_DisabledModeKeepsExistingOrderRecoveryAvailable(t *tes
 	status, err := disabled.AdminStatus()
 	require.NoError(t, err)
 	assert.False(t, status.Enabled)
+}
+
+func newTronTestService(t *testing.T, config TronTopupConfig, price TronPriceClient, chain TronChainClient, now func() time.Time, seed func() (int64, error)) *tronTopupService {
+	t.Helper()
+	require.NoError(t, model.AdvanceTronScanCheckpoint(tronScanCheckpointName, now().Add(-3*time.Minute).UnixMilli(), now().UnixMilli()))
+	return newTronTopupService(config, price, chain, now, seed)
 }

@@ -20,7 +20,7 @@ func TestTronTopupScanner_CreditsMatchRecordsUnmatchedAndAdvancesCheckpoint(t *t
 	now := time.UnixMilli(1_800_000_600_000)
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
 	chain := &stubTronChainClient{}
-	service := newTronTopupService(validTronTestConfig(), price, chain, func() time.Time { return now }, func() (int64, error) { return 321, nil })
+	service := newTronTestService(t, validTronTestConfig(), price, chain, func() time.Time { return now }, func() (int64, error) { return 321, nil })
 	order, err := service.CreateOrder(context.Background(), 9201, 100, decimal.NewFromInt(100), 1_000)
 	require.NoError(t, err)
 	chain.transfers = []TronTransfer{
@@ -40,7 +40,11 @@ func TestTronTopupScanner_CreditsMatchRecordsUnmatchedAndAdvancesCheckpoint(t *t
 	require.NotNil(t, checkpoint)
 	watermark := now.Add(-service.config.IndexSafetyLag)
 	assert.Equal(t, watermark.UnixMilli(), checkpoint.LastScannedMS)
-	assert.Equal(t, watermark.Add(-service.config.ReconcileLookback).UnixMilli(), chain.fromMS)
+	wide, err := model.GetTronScanCheckpoint(tronReconcileCheckpointName)
+	require.NoError(t, err)
+	require.NotNil(t, wide)
+	assert.Equal(t, watermark.Add(-service.config.ReconcileLookback).UnixMilli(), wide.WindowStartMS)
+	assert.Equal(t, watermark.UnixMilli(), wide.LastScannedMS)
 }
 
 func TestTronTopupScanner_DoesNotAdvanceCheckpointWhenChainReadFails(t *testing.T) {
@@ -55,7 +59,7 @@ func TestTronTopupScanner_DoesNotAdvanceCheckpointWhenChainReadFails(t *testing.
 	checkpoint, err := model.GetTronScanCheckpoint(tronScanCheckpointName)
 	require.NoError(t, err)
 	assert.Equal(t, now.Add(-time.Minute).UnixMilli(), checkpoint.LastScannedMS)
-	assert.Equal(t, now.Add(-service.config.IndexSafetyLag-service.config.ReconcileLookback).UnixMilli(), chain.fromMS)
+	assert.Equal(t, now.Add(-time.Minute-service.config.CheckpointOverlap).UnixMilli(), chain.fromMS)
 }
 
 func TestShouldStartTronScanner_RequiresMasterAndEnabledConfig(t *testing.T) {
@@ -79,11 +83,11 @@ func TestTronTopupScanner_ConfirmedAtExpiryBoundaryCredits(t *testing.T) {
 	now := time.UnixMilli(1_800_001_000_000)
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
 	chain := &stubTronChainClient{}
-	service := newTronTopupService(validTronTestConfig(), price, chain, func() time.Time { return now }, func() (int64, error) { return 400, nil })
+	service := newTronTestService(t, validTronTestConfig(), price, chain, func() time.Time { return now }, func() (int64, error) { return 400, nil })
 	order, err := service.CreateOrder(context.Background(), 9202, 100, decimal.NewFromInt(100), 1_000)
 	require.NoError(t, err)
 	chain.transfers = []TronTransfer{{TxID: strings.Repeat("c", 64), BlockTimestampMS: order.ExpiresAtMS, From: "from-c", To: service.config.ReceiveAddress, AmountMicros: order.ExpectedUSDTMicros}}
-	now = now.Add(21 * time.Minute)
+	now = now.Add(24 * time.Minute)
 
 	_, err = service.ScanOnce(context.Background())
 	require.NoError(t, err)
@@ -99,7 +103,10 @@ func TestTronTopupScanner_WideReconciliationCatchesDelayedIndexRecord(t *testing
 
 	_, err := service.ScanOnce(context.Background())
 	require.NoError(t, err)
-	assert.LessOrEqual(t, chain.fromMS, now.Add(-10*time.Minute).UnixMilli())
+	wide, err := model.GetTronScanCheckpoint(tronReconcileCheckpointName)
+	require.NoError(t, err)
+	require.NotNil(t, wide)
+	assert.LessOrEqual(t, wide.WindowStartMS, now.Add(-10*time.Minute).UnixMilli())
 	assert.Equal(t, now.Add(-service.config.IndexSafetyLag).UnixMilli(), chain.toMS)
 }
 
@@ -112,7 +119,10 @@ func TestTronTopupScanner_UsesNarrowCheckpointWindowBetweenHourlyReconciliations
 	_, err := service.ScanOnce(context.Background())
 	require.NoError(t, err)
 	firstWatermark := now.Add(-service.config.IndexSafetyLag)
-	assert.Equal(t, firstWatermark.Add(-service.config.ReconcileLookback).UnixMilli(), chain.fromMS)
+	wide, err := model.GetTronScanCheckpoint(tronReconcileCheckpointName)
+	require.NoError(t, err)
+	require.NotNil(t, wide)
+	assert.Equal(t, firstWatermark.Add(-service.config.ReconcileLookback).UnixMilli(), wide.WindowStartMS)
 
 	now = now.Add(30 * time.Second)
 	_, err = service.ScanOnce(context.Background())
@@ -126,7 +136,7 @@ func TestTronTopupScanner_UnknownDatabaseFailureKeepsCheckpointAndDoesNotCreateR
 	now := time.UnixMilli(1_800_020_000_000)
 	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
 	chain := &stubTronChainClient{}
-	service := newTronTopupService(validTronTestConfig(), price, chain, func() time.Time { return now }, func() (int64, error) { return 500, nil })
+	service := newTronTestService(t, validTronTestConfig(), price, chain, func() time.Time { return now }, func() (int64, error) { return 500, nil })
 	order, err := service.CreateOrder(context.Background(), 9203, 100, decimal.NewFromInt(100), 1_000)
 	require.NoError(t, err)
 	chain.transfers = []TronTransfer{{TxID: strings.Repeat("d", 64), BlockTimestampMS: order.ExpiresAtMS, From: "from-d", To: service.config.ReceiveAddress, AmountMicros: order.ExpectedUSDTMicros}}
@@ -144,7 +154,8 @@ func TestTronTopupScanner_UnknownDatabaseFailureKeepsCheckpointAndDoesNotCreateR
 	assert.ErrorContains(t, err, "injected database failure")
 	checkpoint, err := model.GetTronScanCheckpoint(tronScanCheckpointName)
 	require.NoError(t, err)
-	assert.Nil(t, checkpoint)
+	require.NotNil(t, checkpoint)
+	assert.Less(t, checkpoint.LastScannedMS, chain.transfers[0].BlockTimestampMS)
 	var depositCount int64
 	var ticketCount int64
 	require.NoError(t, model.DB.Model(&model.TronDeposit{}).Count(&depositCount).Error)

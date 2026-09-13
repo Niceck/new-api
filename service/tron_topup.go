@@ -44,6 +44,9 @@ type TronTopupConfig struct {
 }
 
 type TronOrderView struct {
+	ClaimDeadlineMS    int64  `json:"claim_deadline_ms"`
+	CanClaim           bool   `json:"can_claim"`
+	ReviewStatus       string `json:"review_status"`
 	TradeNo            string `json:"trade_no"`
 	Network            string `json:"network"`
 	ReceiveAddress     string `json:"receive_address"`
@@ -57,12 +60,16 @@ type TronOrderView struct {
 }
 
 type TronTopupAdminStatus struct {
-	Enabled             bool   `json:"enabled"`
-	Network             string `json:"network"`
-	ReceiveAddress      string `json:"receive_address"`
-	CheckpointMS        int64  `json:"checkpoint_ms"`
-	CheckpointUpdatedMS int64  `json:"checkpoint_updated_ms"`
-	OpenTickets         int64  `json:"open_tickets"`
+	model.TronDepositSummary
+	AcceptingOrders           bool   `json:"accepting_orders"`
+	ReconciliationTargetMS    int64  `json:"reconciliation_target_ms"`
+	ReconciliationCompletedMS int64  `json:"reconciliation_completed_ms"`
+	Enabled                   bool   `json:"enabled"`
+	Network                   string `json:"network"`
+	ReceiveAddress            string `json:"receive_address"`
+	CheckpointMS              int64  `json:"checkpoint_ms"`
+	CheckpointUpdatedMS       int64  `json:"checkpoint_updated_ms"`
+	OpenTickets               int64  `json:"open_tickets"`
 }
 
 type tronTopupService struct {
@@ -72,7 +79,7 @@ type tronTopupService struct {
 	now             func() time.Time
 	probeSeedSource func() (int64, error)
 	reconcileMu     sync.Mutex
-	lastReconcileMS int64
+	windowTimeout   time.Duration
 }
 
 var (
@@ -138,7 +145,7 @@ func strictTronEnvInt(name string, defaultValue int, minimum int, maximum int) (
 }
 
 func newTronTopupService(config TronTopupConfig, priceClient TronPriceClient, chainClient TronChainClient, now func() time.Time, probeSeedSource func() (int64, error)) *tronTopupService {
-	return &tronTopupService{config: config, priceClient: priceClient, chainClient: chainClient, now: now, probeSeedSource: probeSeedSource}
+	return &tronTopupService{windowTimeout: 10 * time.Second, config: config, priceClient: newCachedTronPriceClient(priceClient, now), chainClient: chainClient, now: now, probeSeedSource: probeSeedSource}
 }
 
 func InitTronTopupService() error {
@@ -214,6 +221,13 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 		return tronOrderView(active, common.TopUpStatusPending, s.config.Network), nil
 	}
 
+	healthy, err := s.acceptingOrders(nowMS)
+	if err != nil {
+		return TronOrderView{}, err
+	}
+	if !healthy {
+		return TronOrderView{}, errors.New("TRON scanner is not ready to accept payments")
+	}
 	rate, quoteUpdatedAt, err := s.priceClient.USDTToCNY(ctx)
 	if err != nil {
 		return TronOrderView{}, fmt.Errorf("USDT/CNY price unavailable: %w", err)
@@ -267,7 +281,7 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 }
 
 func tronOrderView(order *model.TronTopupOrder, status string, network string) TronOrderView {
-	return TronOrderView{TradeNo: order.TradeNo, Network: network, ReceiveAddress: order.ReceiveAddress, TokenContract: order.TokenContract, ExpectedUSDTMicros: order.ExpectedAmountMicros, RateCNYMicros: order.RateCNYMicros, QuoteUpdatedAtMS: order.QuoteUpdatedAtMS, ExpiresAtMS: order.ExpiresAtMS, CreditQuota: order.CreditQuota, Status: status}
+	return TronOrderView{CanClaim: status == common.TopUpStatusPending, ClaimDeadlineMS: order.ExpiresAtMS + model.TronClaimGracePeriodMS, TradeNo: order.TradeNo, Network: network, ReceiveAddress: order.ReceiveAddress, TokenContract: order.TokenContract, ExpectedUSDTMicros: order.ExpectedAmountMicros, RateCNYMicros: order.RateCNYMicros, QuoteUpdatedAtMS: order.QuoteUpdatedAtMS, ExpiresAtMS: order.ExpiresAtMS, CreditQuota: order.CreditQuota, Status: status}
 }
 
 func tronPaymentUniqueOffset(attempt int64, probeSeed int64) int64 {
@@ -306,7 +320,14 @@ func (s *tronTopupService) GetOrder(userID int, tradeNo string) (TronOrderView, 
 	if status == common.TopUpStatusPending && s.now().UnixMilli() > order.ExpiresAtMS {
 		status = common.TopUpStatusExpired
 	}
-	return tronOrderView(order, status, s.config.Network), nil
+	view := tronOrderView(order, status, s.config.Network)
+	view.CanClaim = topUp.Status == common.TopUpStatusPending && s.now().UnixMilli() <= view.ClaimDeadlineMS
+	var ticket model.TronTopupTicket
+	if err := model.DB.Where("order_id = ?", order.ID).Order("id DESC").Limit(1).Find(&ticket).Error; err != nil {
+		return TronOrderView{}, err
+	}
+	view.ReviewStatus = ticket.Status
+	return view, nil
 }
 
 func (s *tronTopupService) SubmitClaim(userID int, tradeNo string, txID string, note string) (*model.TronTopupTicket, error) {
@@ -346,7 +367,7 @@ func (s *tronTopupService) ResolveTicket(ctx context.Context, ticketID int64, or
 		if transfer.TxID != ticket.TxID {
 			continue
 		}
-		record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, ObservedAtMS: now.UnixMilli()}
+		record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, SourceAddresses: transfer.SourceAddresses, ObservedAtMS: now.UnixMilli()}
 		return model.ResolveTronTopupTicket(ticketID, orderID, record, resolverID, note)
 	}
 	return errors.New("confirmed TRON transaction not found")
@@ -365,10 +386,37 @@ func (s *tronTopupService) AdminStatus() (TronTopupAdminStatus, error) {
 	if err != nil {
 		return TronTopupAdminStatus{}, err
 	}
-	status := TronTopupAdminStatus{Enabled: s.config.Enabled, Network: s.config.Network, ReceiveAddress: s.config.ReceiveAddress, OpenTickets: openTickets}
+	summary, err := model.GetTronDepositSummary()
+	if err != nil {
+		return TronTopupAdminStatus{}, err
+	}
+	accepting, err := s.acceptingOrders(s.now().UnixMilli())
+	if err != nil {
+		return TronTopupAdminStatus{}, err
+	}
+	reconciliation, err := model.GetTronScanCheckpoint(tronReconcileCheckpointName)
+	if err != nil {
+		return TronTopupAdminStatus{}, err
+	}
+	status := TronTopupAdminStatus{TronDepositSummary: summary, AcceptingOrders: accepting, Enabled: s.config.Enabled, Network: s.config.Network, ReceiveAddress: s.config.ReceiveAddress, OpenTickets: openTickets}
 	if checkpoint != nil {
 		status.CheckpointMS = checkpoint.LastScannedMS
 		status.CheckpointUpdatedMS = checkpoint.UpdatedAtMS
 	}
+	if reconciliation != nil {
+		status.ReconciliationCompletedMS = reconciliation.CompletedAtMS
+		status.ReconciliationTargetMS = reconciliation.WindowEndMS
+	}
 	return status, nil
+}
+
+func (s *tronTopupService) acceptingOrders(nowMS int64) (bool, error) {
+	checkpoint, err := model.GetTronScanCheckpoint(tronScanCheckpointName)
+	if err != nil {
+		return false, err
+	}
+	if !s.config.Enabled || checkpoint == nil {
+		return false, nil
+	}
+	return checkpoint.LastScannedMS > 0 && checkpoint.UpdatedAtMS > 0 && checkpoint.LastScannedMS <= nowMS && checkpoint.UpdatedAtMS <= nowMS && nowMS-checkpoint.LastScannedMS <= 10*60*1000 && nowMS-checkpoint.UpdatedAtMS <= 6*60*1000, nil
 }

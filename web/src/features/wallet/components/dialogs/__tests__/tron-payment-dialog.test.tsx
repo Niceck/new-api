@@ -323,4 +323,18 @@ describe('TronPaymentDialog', () => {
       Date.now = originalNow
     }
   })
+  test('expired orders remove payable QR and allow manual refresh', async () => {
+    const rendered = await renderDialog({
+      order: { ...order, status: 'expired', expires_at_ms: Date.now() - 1000 },
+    })
+    assert.equal(
+      document.querySelector('svg[aria-label="TRON payment address QR code"]'),
+      null
+    )
+    assert.ok(
+      document.querySelector('button[aria-label="Refresh payment status"]')
+    )
+    await act(async () => rendered.root.unmount())
+    rendered.container.remove()
+  })
 })

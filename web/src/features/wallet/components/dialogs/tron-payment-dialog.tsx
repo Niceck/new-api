@@ -47,6 +47,8 @@ interface TronPaymentDialogProps {
   onOpenChange: (open: boolean) => void
   onSubmitClaim: (txID: string, note: string) => Promise<boolean>
   claiming: boolean
+  onRefresh?: () => Promise<void>
+  refreshing?: boolean
 }
 
 function formatRate(micros: number): string {
@@ -99,7 +101,11 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
   const visibleNowMS = props.open ? Date.now() : nowMS
   const expired =
     props.order.status === 'expired' || visibleNowMS > props.order.expires_at_ms
-  const canClaim = expired || showClaim
+  const canClaim =
+    (expired || showClaim) &&
+    props.order.can_claim !== false &&
+    visibleNowMS <=
+      (props.order.claim_deadline_ms ?? props.order.expires_at_ms + 86_400_000)
   const remaining = formatTronRemaining(
     props.order.expires_at_ms - visibleNowMS
   )
@@ -131,7 +137,20 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
 
   let recoveryContent: ReactNode = null
   if (props.order.status !== 'success') {
-    if (canClaim) {
+    if (
+      props.order.can_claim === false ||
+      visibleNowMS >
+        (props.order.claim_deadline_ms ??
+          props.order.expires_at_ms + 86_400_000)
+    ) {
+      recoveryContent = (
+        <Alert>
+          <AlertDescription>
+            {t('Claim period ended. Contact support for help.')}
+          </AlertDescription>
+        </Alert>
+      )
+    } else if (canClaim) {
       recoveryContent = (
         <form className='space-y-3 border-t pt-4' onSubmit={handleClaim}>
           <div className='space-y-2'>
@@ -196,7 +215,9 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
         <DialogHeader>
           <DialogTitle>{t('Pay with USDT on TRON')}</DialogTitle>
           <DialogDescription>
-            {t('Send the exact amount before the countdown ends.')}
+            {expired
+              ? t('Payment deadline passed. You can still check for credit.')
+              : t('Send the exact amount before the countdown ends.')}
           </DialogDescription>
         </DialogHeader>
 
@@ -210,22 +231,24 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
             </AlertDescription>
           </Alert>
 
-          <div
-            className='flex flex-col items-center gap-3 rounded-xl border bg-white p-4 text-slate-950 dark:bg-white'
-            aria-label={t('TRON payment address QR code')}
-          >
-            <QRCodeSVG
-              value={props.order.receive_address}
-              size={176}
-              level='M'
-              marginSize={1}
-              role='img'
+          {!expired && props.order.status !== 'success' ? (
+            <div
+              className='flex flex-col items-center gap-3 rounded-xl border bg-white p-4 text-slate-950 dark:bg-white'
               aria-label={t('TRON payment address QR code')}
-            />
-            <span className='text-xs font-medium text-slate-700'>
-              {t('Scan the receiving address')}
-            </span>
-          </div>
+            >
+              <QRCodeSVG
+                value={props.order.receive_address}
+                size={176}
+                level='M'
+                marginSize={1}
+                role='img'
+                aria-label={t('TRON payment address QR code')}
+              />
+              <span className='text-xs font-medium text-slate-700'>
+                {t('Scan the receiving address')}
+              </span>
+            </div>
+          ) : null}
 
           <div className='grid gap-3'>
             <div className='rounded-lg border p-3'>
@@ -240,6 +263,7 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
                   type='button'
                   variant='outline'
                   size='sm'
+                  disabled={expired || props.order.status === 'success'}
                   aria-label={t('Copy payment amount')}
                   onClick={() => void copyToClipboard(amount)}
                 >
@@ -263,6 +287,7 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
                   type='button'
                   variant='outline'
                   size='sm'
+                  disabled={expired || props.order.status === 'success'}
                   aria-label={t('Copy receiving address')}
                   onClick={() =>
                     void copyToClipboard(props.order?.receive_address ?? '')
@@ -330,6 +355,23 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
           <span className='sr-only' aria-live='polite'>
             {statusAnnouncement}
           </span>
+          <Button
+            type='button'
+            variant='outline'
+            className='w-full'
+            aria-label={t('Refresh payment status')}
+            disabled={props.refreshing}
+            onClick={() => void props.onRefresh?.()}
+          >
+            {t('Refresh payment status')}
+          </Button>
+          {props.order.review_status === 'open' ? (
+            <Alert>
+              <AlertDescription>
+                {t('Your claim was submitted for manual review.')}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {recoveryContent}
         </div>
       </DialogContent>

@@ -75,16 +75,23 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
   const [processing, setProcessing] = useState(false)
   const [claiming, setClaiming] = useState(false)
   const successNotifiedTradeNo = useRef<string | null>(null)
+  const requestGeneration = useRef(0)
 
   useEffect(() => {
     const tradeNo = order?.trade_no
-    if (!open || !tradeNo || order.status !== 'pending') {
+    if (!open || !tradeNo || order.status === 'success') {
       return
     }
 
     let cancelled = false
     let scheduleID = 0
-    let retryDelayMS = dependencies.pollDelayMS
+    const deadline = order.claim_deadline_ms ?? order.expires_at_ms + 86_400_000
+    if (Date.now() > deadline) return
+    const normalDelayMS =
+      order.status === 'expired' || Date.now() > order.expires_at_ms
+        ? 30_000
+        : dependencies.pollDelayMS
+    let retryDelayMS = normalDelayMS
     const scheduleNext = (delayMS: number) => {
       scheduleID = dependencies.schedule(poll, delayMS)
     }
@@ -96,7 +103,7 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
         }
         if (!isApiSuccess(response) || !response.data) {
           retryDelayMS = Math.min(retryDelayMS * 2, 30_000)
-          scheduleNext(retryDelayMS)
+          if (Date.now() <= deadline) scheduleNext(retryDelayMS)
           return
         }
         setOrder(response.data)
@@ -107,24 +114,33 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
           }
           return
         }
-        if (response.data.status === 'pending' && !cancelled) {
-          retryDelayMS = dependencies.pollDelayMS
+        if (!cancelled && Date.now() <= deadline) {
+          retryDelayMS =
+            response.data.status === 'expired' ? 30_000 : normalDelayMS
           scheduleNext(retryDelayMS)
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && Date.now() <= deadline) {
           retryDelayMS = Math.min(retryDelayMS * 2, 30_000)
           scheduleNext(retryDelayMS)
         }
       }
     }
 
-    scheduleID = dependencies.schedule(poll, dependencies.pollDelayMS)
+    scheduleID = dependencies.schedule(poll, normalDelayMS)
     return () => {
       cancelled = true
       dependencies.cancelSchedule(scheduleID)
     }
-  }, [dependencies, onSuccess, open, order?.status, order?.trade_no])
+  }, [
+    dependencies,
+    onSuccess,
+    open,
+    order?.status,
+    order?.trade_no,
+    order?.expires_at_ms,
+    order?.claim_deadline_ms,
+  ])
 
   const startPayment = useCallback(
     async (amount: number): Promise<boolean> => {
@@ -132,9 +148,11 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
         toast.error(i18next.t('Invalid top-up amount'))
         return false
       }
+      const generation = ++requestGeneration.current
       setProcessing(true)
       try {
         const response = await dependencies.createOrder(amount)
+        if (generation !== requestGeneration.current) return false
         if (!isApiSuccess(response) || !response.data) {
           toast.error(
             response.message || i18next.t('TRON top-up order creation failed')
@@ -151,7 +169,7 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
         toast.error(i18next.t('TRON top-up order creation failed'))
         return false
       } finally {
-        setProcessing(false)
+        if (generation === requestGeneration.current) setProcessing(false)
       }
     },
     [dependencies]
@@ -193,9 +211,55 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
     [dependencies, order]
   )
 
-  const onOpenChange = useCallback((nextOpen: boolean) => {
-    setOpen(nextOpen)
-  }, [])
+  const resumeOrder = useCallback(
+    async (tradeNo: string): Promise<boolean> => {
+      const generation = ++requestGeneration.current
+      setProcessing(true)
+      try {
+        const response = await dependencies.getOrder(tradeNo)
+        if (generation !== requestGeneration.current) return false
+        if (!isApiSuccess(response) || !response.data) {
+          toast.error(
+            response.message || i18next.t('Unable to refresh payment status')
+          )
+          return false
+        }
+        setOrder(response.data)
+        setOpen(true)
+        if (
+          response.data.status === 'success' &&
+          successNotifiedTradeNo.current !== tradeNo
+        ) {
+          successNotifiedTradeNo.current = tradeNo
+          await onSuccess?.()
+        }
+        return true
+      } catch {
+        toast.error(i18next.t('Unable to refresh payment status'))
+        return false
+      } finally {
+        if (generation === requestGeneration.current) setProcessing(false)
+      }
+    },
+    [dependencies, onSuccess]
+  )
+
+  const refreshOrder = useCallback(async () => {
+    if (order) await resumeOrder(order.trade_no)
+  }, [order, resumeOrder])
+
+  const onOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) {
+        requestGeneration.current++
+        setProcessing(false)
+      } else {
+        void refreshOrder()
+      }
+      setOpen(nextOpen)
+    },
+    [refreshOrder]
+  )
 
   return {
     order,
@@ -205,5 +269,7 @@ export function useTronPayment(options: UseTronPaymentOptions = {}) {
     startPayment,
     submitClaim,
     onOpenChange,
+    resumeOrder,
+    refreshOrder,
   }
 }
