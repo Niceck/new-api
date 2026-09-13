@@ -202,6 +202,15 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
     }
   }
 
+  let paymentDescription = t('Send the exact amount before the countdown ends.')
+  if (props.order.status === 'success') {
+    paymentDescription = t('Top-up credited successfully')
+  } else if (expired) {
+    paymentDescription = t(
+      'Payment deadline passed. You can still check for credit.'
+    )
+  }
+
   let statusAnnouncement = ''
   if (props.order.status === 'success') {
     statusAnnouncement = t('Top-up credited successfully')
@@ -214,11 +223,7 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
       <DialogContent className='max-h-[calc(100vh-2rem)] overflow-y-auto overscroll-contain sm:max-w-lg'>
         <DialogHeader>
           <DialogTitle>{t('Pay with USDT on TRON')}</DialogTitle>
-          <DialogDescription>
-            {expired
-              ? t('Payment deadline passed. You can still check for credit.')
-              : t('Send the exact amount before the countdown ends.')}
-          </DialogDescription>
+          <DialogDescription>{paymentDescription}</DialogDescription>
         </DialogHeader>
 
         <div className='space-y-4'>

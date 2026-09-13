@@ -337,4 +337,17 @@ describe('TronPaymentDialog', () => {
     await act(async () => rendered.root.unmount())
     rendered.container.remove()
   })
+  test('credited expired order announces credit rather than waiting for payment', async () => {
+    const rendered = await renderDialog({
+      order: { ...order, status: 'success', expires_at_ms: Date.now() - 1000 },
+    })
+    assert.equal(
+      document.body.textContent?.includes(
+        'Payment deadline passed. You can still check for credit.'
+      ),
+      false
+    )
+    await act(async () => rendered.root.unmount())
+    rendered.container.remove()
+  })
 })
