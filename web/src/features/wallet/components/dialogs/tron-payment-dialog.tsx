@@ -275,6 +275,11 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
                   {t('Copy')}
                 </Button>
               </div>
+              <p className='text-muted-foreground mt-2 text-xs leading-5'>
+                {t(
+                  'Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.'
+                )}
+              </p>
             </div>
 
             <div className='rounded-lg border p-3'>

@@ -178,7 +178,18 @@ func (c *tronGridClient) ConfirmedIncoming(ctx context.Context, fromMS, toMS int
 			if err != nil {
 				return nil, err
 			}
-			if transfer.BlockTimestampMS < fromMS || transfer.BlockTimestampMS > toMS {
+			if transfer.BlockTimestampMS < fromMS {
+				// TronGrid rounds min_timestamp down to the containing second, so a
+				// window that starts mid-second also returns transfers from earlier in
+				// that same second. They belong to the previous window, which already
+				// settled them; treating them as a contract violation would wedge the
+				// scanner on this window forever. Anything older is still a violation.
+				if transfer.BlockTimestampMS < fromMS-fromMS%1000 {
+					return nil, errors.New("TronGrid transfer is outside requested window")
+				}
+				continue
+			}
+			if transfer.BlockTimestampMS > toMS {
 				return nil, errors.New("TronGrid transfer is outside requested window")
 			}
 			if transfer.AmountMicros == 0 {

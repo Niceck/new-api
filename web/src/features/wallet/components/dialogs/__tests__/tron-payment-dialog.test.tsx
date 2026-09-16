@@ -138,6 +138,12 @@ describe('TronPaymentDialog', () => {
     assert.equal(formatTronCNYValue(13_791_234, 7_250_000), '99.99')
     assert.equal(bodyText.includes('¥99.99'), true)
     assert.equal(bodyText.includes('TRON / TRC20'), true)
+    assert.equal(
+      bodyText.includes(
+        'Exchange withdrawals may deduct a network fee from the amount sent.'
+      ),
+      true
+    )
     const priceAttribution = document.querySelector<HTMLAnchorElement>(
       'a[href="https://www.coingecko.com/en/api"]'
     )

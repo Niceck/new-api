@@ -64,6 +64,7 @@ const topupInfo: TopupInfo = {
   enable_online_topup: false,
   enable_stripe_topup: false,
   enable_tron_topup: true,
+  tron_min_topup: 100,
   pay_methods: [
     {
       name: 'Legacy TRON',
@@ -126,9 +127,53 @@ describe('RechargeFormCard TRON compatibility', () => {
         name: 'USDT (TRON/TRC20)',
         type: 'tron',
         color: '#EF0027',
-        min_topup: 10,
+        min_topup: 100,
       },
     ])
+
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
+  test('disables the TRON action below the TRON-specific minimum', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <RechargeFormCard
+            topupInfo={topupInfo}
+            presetAmounts={[]}
+            selectedPreset={null}
+            onSelectPreset={() => undefined}
+            topupAmount={50}
+            onTopupAmountChange={() => undefined}
+            paymentAmount={50}
+            calculating={false}
+            onPaymentMethodSelect={() => undefined}
+            paymentLoading={null}
+            redemptionCode=''
+            onRedemptionCodeChange={() => undefined}
+            onRedeem={() => undefined}
+            redeeming={false}
+          />
+        </I18nextProvider>
+      )
+    })
+
+    const tronButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label^="USDT (TRON/TRC20)"]'
+    )
+    assert.ok(tronButton)
+    assert.equal(tronButton.disabled, true)
+    assert.match(tronButton.getAttribute('aria-label') ?? '', /100/)
+    const alipayButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Alipay"]'
+    )
+    assert.ok(alipayButton)
+    assert.equal(alipayButton.disabled, false)
 
     await act(async () => root.unmount())
     container.remove()

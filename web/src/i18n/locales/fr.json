@@ -5285,6 +5285,7 @@
     "Receiving address": "Adresse de réception",
     "Scan the receiving address": "Scanner l’adresse de réception",
     "Send the exact amount before the countdown ends.": "Envoyez le montant exact avant la fin du compte à rebours.",
+    "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.": "Les retraits depuis une plateforme d'échange peuvent déduire des frais de réseau du montant envoyé. Assurez-vous que le montant reçu corresponde exactement au montant indiqué.",
     "Submit top-up claim": "Envoyer la réclamation de recharge",
     "TRON mainnet only": "Réseau principal TRON uniquement",
     "TRON payment address QR code": "Code QR de l’adresse de paiement TRON",

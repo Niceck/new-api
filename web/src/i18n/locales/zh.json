@@ -5285,6 +5285,7 @@
     "Receiving address": "收款地址",
     "Scan the receiving address": "扫码获取收款地址",
     "Send the exact amount before the countdown ends.": "请在倒计时结束前发送完全一致的金额。",
+    "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.": "交易所提币可能会从发送金额中扣除网络手续费，请确保实际到账金额与精确付款金额一致。",
     "Submit top-up claim": "提交充值申诉",
     "TRON mainnet only": "仅限 TRON 主网",
     "TRON payment address QR code": "TRON 收款地址二维码",

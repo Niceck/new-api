@@ -180,6 +180,8 @@ export interface TopupInfo {
   enable_waffo_pancake_topup?: boolean
   /** Whether TRON mainnet TRC20-USDT topup is enabled */
   enable_tron_topup?: boolean
+  /** Minimum topup amount for TRON (exchange withdrawal minimums and fees) */
+  tron_min_topup?: number
   /** Minimum topup amount for Waffo Pancake */
   waffo_pancake_min_topup?: number
   /** Whether redemption code usage is enabled */

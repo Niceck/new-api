@@ -21,6 +21,8 @@ import (
 const (
 	defaultTronTopupMaxCNY         int64 = 2_000
 	maximumTronTopupMaxCNY         int64 = 2_000
+	defaultTronTopupMinAmount      int64 = 10
+	maximumTronTopupMinAmount      int64 = 1_000_000
 	defaultTronOrderTTLMinutes           = 20
 	defaultTronScanIntervalSeconds       = 30
 )
@@ -41,6 +43,10 @@ type TronTopupConfig struct {
 	ReconcileLookback time.Duration
 	ReconcileInterval time.Duration
 	MaxCNY            int64
+	// MinAmount is the smallest top-up (in top-up units, the same units as the
+	// order request) that may be paid with TRON. Exchange withdrawals enforce
+	// their own minimums and fees, so sub-minimum orders are never paid.
+	MinAmount int64
 }
 
 type TronOrderView struct {
@@ -86,6 +92,7 @@ var (
 	defaultTronTopupServiceMu           sync.RWMutex
 	defaultTronService                  *tronTopupService
 	ErrTronChainVerificationUnavailable = errors.New("TRON chain verification is unavailable")
+	ErrTronAmountBelowMinimum           = errors.New("TRON top-up amount is below the minimum")
 )
 
 func loadTronTopupConfig() (TronTopupConfig, error) {
@@ -121,6 +128,10 @@ func loadTronTopupConfig() (TronTopupConfig, error) {
 	if err != nil {
 		return TronTopupConfig{}, err
 	}
+	minAmount, err := strictTronEnvInt("TRON_TOPUP_MIN_AMOUNT", int(defaultTronTopupMinAmount), 1, int(maximumTronTopupMinAmount))
+	if err != nil {
+		return TronTopupConfig{}, err
+	}
 	config.OrderTTL = time.Duration(ttlMinutes) * time.Minute
 	config.ScanInterval = time.Duration(intervalSeconds) * time.Second
 	config.IndexSafetyLag = 3 * time.Minute
@@ -129,6 +140,7 @@ func loadTronTopupConfig() (TronTopupConfig, error) {
 	config.ReconcileLookback = 25 * time.Hour
 	config.ReconcileInterval = time.Hour
 	config.MaxCNY = int64(maxCNY)
+	config.MinAmount = int64(minAmount)
 	return config, nil
 }
 
@@ -210,6 +222,9 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 	}
 	if creditQuota <= 0 || creditQuota > common.MaxQuota {
 		return TronOrderView{}, errors.New("TRON top-up quota is out of range")
+	}
+	if requestedAmount < s.config.MinAmount {
+		return TronOrderView{}, ErrTronAmountBelowMinimum
 	}
 	now := s.now()
 	nowMS := now.UnixMilli()

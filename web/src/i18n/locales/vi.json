@@ -5285,6 +5285,7 @@
     "Receiving address": "Địa chỉ nhận",
     "Scan the receiving address": "Quét địa chỉ nhận",
     "Send the exact amount before the countdown ends.": "Gửi đúng số tiền trước khi hết thời gian đếm ngược.",
+    "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.": "Rút tiền từ sàn giao dịch có thể bị trừ phí mạng từ số tiền gửi. Hãy đảm bảo số tiền nhận được đúng bằng số tiền chính xác.",
     "Submit top-up claim": "Gửi khiếu nại nạp tiền",
     "TRON mainnet only": "Chỉ mạng chính TRON",
     "TRON payment address QR code": "Mã QR địa chỉ thanh toán TRON",

@@ -5285,6 +5285,7 @@
     "Receiving address": "受取アドレス",
     "Scan the receiving address": "受取アドレスをスキャン",
     "Send the exact amount before the countdown ends.": "カウントダウン終了前に正確な金額を送金してください。",
+    "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.": "取引所からの出金では送金額からネットワーク手数料が差し引かれる場合があります。着金額が正確な支払金額と一致するようにしてください。",
     "Submit top-up claim": "チャージ申請を送信",
     "TRON mainnet only": "TRONメインネットのみ",
     "TRON payment address QR code": "TRON支払いアドレスのQRコード",

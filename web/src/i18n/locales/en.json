@@ -5285,6 +5285,7 @@
     "Receiving address": "Receiving address",
     "Scan the receiving address": "Scan the receiving address",
     "Send the exact amount before the countdown ends.": "Send the exact amount before the countdown ends.",
+    "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.": "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.",
     "Submit top-up claim": "Submit top-up claim",
     "TRON mainnet only": "TRON mainnet only",
     "TRON payment address QR code": "TRON payment address QR code",

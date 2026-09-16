@@ -19,6 +19,7 @@ import (
 
 type stubTronTopupOperations struct {
 	createView      service.TronOrderView
+	createErr       error
 	createUserID    int
 	createAmount    int64
 	createPayCNY    decimal.Decimal
@@ -44,6 +45,9 @@ func (s *stubTronTopupOperations) CreateOrder(_ context.Context, userID int, amo
 	s.createAmount = amount
 	s.createPayCNY = payCNY
 	s.createQuota = quota
+	if s.createErr != nil {
+		return service.TronOrderView{}, s.createErr
+	}
 	return s.createView, nil
 }
 
@@ -143,6 +147,47 @@ func TestCreateTronTopupOrder_UsesServerCalculatedMoneyAndQuota(t *testing.T) {
 	assert.Equal(t, 1, operations.createCalls)
 }
 
+func TestCreateTronTopupOrder_EnforcesTronMinimumBeforeService(t *testing.T) {
+	operations := &stubTronTopupOperations{createView: service.TronOrderView{TradeNo: "TRON-order", Status: common.TopUpStatusPending}}
+	withTronControllerDependencies(t, operations)
+	getTronPublicConfig = func() (service.TronTopupConfig, bool) {
+		return service.TronTopupConfig{Enabled: true, Network: "mainnet", ReceiveAddress: "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f", MinAmount: 100}, true
+	}
+
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", `{"amount":99}`, 42, CreateTronTopupOrder)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "最低 100")
+	assert.Zero(t, operations.createCalls)
+
+	recorder = tronHandlerResponse(t, http.MethodPost, "/", `{"amount":100}`, 42, CreateTronTopupOrder)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Equal(t, 1, operations.createCalls)
+
+	originalDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
+	originalQuotaPerUnit := common.QuotaPerUnit
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeTokens
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() {
+		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
+		common.QuotaPerUnit = originalQuotaPerUnit
+	})
+	assert.Equal(t, int64(50_000_000), getTronMinTopup())
+	recorder = tronHandlerResponse(t, http.MethodPost, "/", `{"amount":49999999}`, 42, CreateTronTopupOrder)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Equal(t, 1, operations.createCalls)
+}
+
+func TestCreateTronTopupOrder_MapsServiceMinimumRejectionToUserMessage(t *testing.T) {
+	operations := &stubTronTopupOperations{createErr: service.ErrTronAmountBelowMinimum}
+	withTronControllerDependencies(t, operations)
+
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", `{"amount":100}`, 42, CreateTronTopupOrder)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "低于最低限额")
+}
+
 func TestCreateTronTopupOrder_RejectsDirectCallWhenComplianceIsDisabled(t *testing.T) {
 	operations := &stubTronTopupOperations{createView: service.TronOrderView{TradeNo: "must-not-create"}}
 	withTronControllerDependencies(t, operations)
@@ -217,8 +262,20 @@ func TestGetTopUpInfo_AdvertisesTronWithoutAddingLegacyEpayMethod(t *testing.T) 
 	recorder := tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"enable_tron_topup":true`)
+	assert.Contains(t, recorder.Body.String(), `"tron_min_topup":0`)
 	assert.NotContains(t, recorder.Body.String(), `"type":"tron"`)
 	assert.NotContains(t, recorder.Body.String(), "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f")
+
+	getTronPublicConfig = func() (service.TronTopupConfig, bool) {
+		return service.TronTopupConfig{Enabled: true, Network: "mainnet", ReceiveAddress: "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f", MinAmount: 100}, true
+	}
+	recorder = tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
+	assert.Contains(t, recorder.Body.String(), `"tron_min_topup":100`)
+
+	isTopupComplianceConfirmed = func() bool { return false }
+	recorder = tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
+	assert.Contains(t, recorder.Body.String(), `"enable_tron_topup":false`)
+	assert.Contains(t, recorder.Body.String(), `"tron_min_topup":0`)
 }
 
 func TestRequestEpay_RejectsTronBeforeLegacyGateway(t *testing.T) {

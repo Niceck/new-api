@@ -64,6 +64,7 @@ func validTronTestConfig() TronTopupConfig {
 		ReconcileLookback: 25 * time.Hour,
 		ReconcileInterval: time.Hour,
 		MaxCNY:            2_000,
+		MinAmount:         10,
 	}
 }
 
@@ -85,6 +86,12 @@ func TestLoadTronTopupConfig_RequiresEnabledValidMainnetAddress(t *testing.T) {
 	assert.Equal(t, 20*time.Minute, config.OrderTTL)
 	assert.Equal(t, 30*time.Second, config.ScanInterval)
 	assert.Equal(t, int64(2_000), config.MaxCNY)
+	assert.Equal(t, int64(10), config.MinAmount)
+
+	t.Setenv("TRON_TOPUP_MIN_AMOUNT", "100")
+	config, err = loadTronTopupConfig()
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), config.MinAmount)
 
 	t.Setenv("TRON_RECEIVE_ADDRESS", "bad")
 	_, err = loadTronTopupConfig()
@@ -149,6 +156,9 @@ func TestLoadTronTopupConfig_RejectsMalformedNumericSafetyValues(t *testing.T) {
 		{name: "whitespace ttl", key: "TRON_TOPUP_ORDER_TTL_MINUTES", value: " 20 "},
 		{name: "overflow interval", key: "TRON_TOPUP_SCAN_INTERVAL_SECONDS", value: "999999999999999999999"},
 		{name: "malformed max", key: "TRON_TOPUP_MAX_CNY", value: "100x"},
+		{name: "zero min amount", key: "TRON_TOPUP_MIN_AMOUNT", value: "0"},
+		{name: "negative min amount", key: "TRON_TOPUP_MIN_AMOUNT", value: "-5"},
+		{name: "malformed min amount", key: "TRON_TOPUP_MIN_AMOUNT", value: "ten"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TRON_TOPUP_ENABLED", "true")
@@ -260,6 +270,27 @@ func TestTronTopupService_CreateOrderFailsClosedOnPriceAndQuotaBounds(t *testing
 	var count int64
 	require.NoError(t, model.DB.Model(&model.TronTopupOrder{}).Count(&count).Error)
 	assert.Zero(t, count)
+}
+
+func TestTronTopupService_CreateOrderRejectsAmountBelowMinimumBeforeQuoting(t *testing.T) {
+	truncate(t)
+	seedTronServiceUser(t, 9106)
+	now := time.UnixMilli(1_800_000_000_000)
+	price := &stubTronPriceClient{rate: decimal.NewFromInt(10), updatedAt: now}
+	config := validTronTestConfig()
+	config.MinAmount = 100
+	service := newTronTestService(t, config, price, &stubTronChainClient{}, func() time.Time { return now }, func() (int64, error) { return 1, nil })
+
+	_, err := service.CreateOrder(context.Background(), 9106, 99, decimal.NewFromInt(99), 49_500_000)
+	assert.ErrorIs(t, err, ErrTronAmountBelowMinimum)
+	assert.Equal(t, int32(0), price.calls.Load(), "sub-minimum orders must not consume a price quote")
+	var count int64
+	require.NoError(t, model.DB.Model(&model.TronTopupOrder{}).Count(&count).Error)
+	assert.Zero(t, count)
+
+	order, err := service.CreateOrder(context.Background(), 9106, 100, decimal.NewFromInt(100), 50_000_000)
+	require.NoError(t, err)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
 }
 
 func TestTronTopupService_DisabledModeKeepsExistingOrderRecoveryAvailable(t *testing.T) {

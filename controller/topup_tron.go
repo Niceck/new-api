@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -39,6 +40,20 @@ func defaultTronTopupOperations() (tronTopupOperations, error) {
 	return service.GetDefaultTronTopupService()
 }
 
+// getTronMinTopup returns the TRON-specific minimum in the same display units
+// as the order request, mirroring getMinTopup for TOKENS display mode.
+func getTronMinTopup() int64 {
+	config, configured := getTronPublicConfig()
+	if !configured || config.MinAmount <= 0 {
+		return 0
+	}
+	minTopup := config.MinAmount
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		minTopup = decimal.NewFromInt(minTopup).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart()
+	}
+	return minTopup
+}
+
 type createTronTopupRequest struct {
 	Amount int64 `json:"amount"`
 }
@@ -51,6 +66,10 @@ func CreateTronTopupOrder(c *gin.Context) {
 	var request createTronTopupRequest
 	if err := c.ShouldBindJSON(&request); err != nil || request.Amount < getMinTopup() {
 		common.ApiErrorMsg(c, "充值金额无效")
+		return
+	}
+	if tronMinTopup := getTronMinTopup(); request.Amount < tronMinTopup {
+		common.ApiErrorMsg(c, fmt.Sprintf("USDT 充值最低 %d，请提高充值金额（交易所提币有最低数量与手续费）", tronMinTopup))
 		return
 	}
 	userID := c.GetInt("id")
@@ -82,6 +101,10 @@ func CreateTronTopupOrder(c *gin.Context) {
 	}
 	order, err := operations.CreateOrder(c.Request.Context(), userID, accountingAmount, payCNY, creditQuota)
 	if err != nil {
+		if errors.Is(err, service.ErrTronAmountBelowMinimum) {
+			common.ApiErrorMsg(c, "USDT 充值金额低于最低限额，请提高充值金额")
+			return
+		}
 		logger.LogWarn(c.Request.Context(), "create TRON top-up order failed: "+err.Error())
 		common.ApiErrorMsg(c, "TRON 充值订单创建失败，请稍后重试")
 		return

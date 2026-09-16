@@ -149,7 +149,10 @@ export function RechargeFormCard({
           name: 'USDT (TRON/TRC20)',
           type: PAYMENT_TYPES.TRON,
           color: '#EF0027',
-          min_topup: getMinTopupAmount(topupInfo),
+          min_topup: Math.max(
+            getMinTopupAmount(topupInfo),
+            topupInfo.tron_min_topup ?? 0
+          ),
         },
       ]
     : []

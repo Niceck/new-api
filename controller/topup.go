@@ -105,8 +105,10 @@ func GetTopUpInfo(c *gin.Context) {
 	}
 
 	enableTron := false
+	tronMinTopup := int64(0)
 	if _, configured := getTronPublicConfig(); configured && complianceConfirmed {
 		enableTron = true
+		tronMinTopup = getTronMinTopup()
 	}
 
 	data := gin.H{
@@ -116,6 +118,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
 		"enable_tron_topup":                enableTron,
+		"tron_min_topup":                   tronMinTopup,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,

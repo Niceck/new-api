@@ -5285,6 +5285,7 @@
     "Receiving address": "Адрес получателя",
     "Scan the receiving address": "Сканировать адрес получателя",
     "Send the exact amount before the countdown ends.": "Отправьте точную сумму до завершения обратного отсчёта.",
+    "Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.": "При выводе с биржи из отправляемой суммы может быть удержана сетевая комиссия. Убедитесь, что полученная сумма точно совпадает с указанной.",
     "Submit top-up claim": "Подать заявку на пополнение",
     "TRON mainnet only": "Только основная сеть TRON",
     "TRON payment address QR code": "QR-код адреса платежа TRON",
