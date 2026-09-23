@@ -29,9 +29,12 @@ import {
   type ParsedTier,
 } from './billing-expr'
 import { getDisplayGroupRatio } from './model-helpers'
+import { formatBasePriceUSD } from './price'
 
 type DynamicPriceOptions = {
   tokenUnit: TokenUnit
+  /** Raw USD quote, independent of wallet, group, and recharge settings. */
+  baseUSD?: boolean
   showRechargePrice?: boolean
   priceRate?: number
   usdExchangeRate?: number
@@ -87,6 +90,11 @@ export function formatDynamicUnitPrice(
   valuePerMillionTokens: number,
   options: DynamicPriceOptions
 ): string {
+  if (options.baseUSD) {
+    return formatBasePriceUSD(
+      valuePerMillionTokens / TOKEN_UNIT_DIVISORS[options.tokenUnit]
+    )
+  }
   const groupRatio = options.groupRatioMultiplier ?? 1
   const priceRate = options.priceRate ?? 1
   const usdExchangeRate = options.usdExchangeRate ?? 1

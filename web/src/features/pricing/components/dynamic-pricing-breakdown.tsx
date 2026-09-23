@@ -48,6 +48,8 @@ import {
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
+  /** Catalog base quotes use USD; usage logs keep the configured currency. */
+  baseUSD?: boolean
   /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
@@ -173,12 +175,14 @@ export function DynamicPricingBreakdown({
   requestRules,
   hideCacheColumns = false,
   compact = false,
+  baseUSD = false,
 }: DynamicPricingBreakdownProps) {
   const { t } = useTranslation()
   const expr = billingExpr || ''
   const currency = useSystemConfigStore((s) => s.config.currency)
 
   const { symbol, rate } = useMemo(() => {
+    if (baseUSD) return { symbol: '$', rate: 1 }
     if (currency.quotaDisplayType === 'CNY') {
       return { symbol: '¥', rate: currency.usdExchangeRate || 7 }
     }
@@ -189,7 +193,7 @@ export function DynamicPricingBreakdown({
       }
     }
     return { symbol: '$', rate: 1 }
-  }, [currency])
+  }, [currency, baseUSD])
 
   const { tiers, ruleGroups } = useMemo(() => {
     const split = splitBillingExprAndRequestRules(expr)
@@ -279,6 +283,11 @@ export function DynamicPricingBreakdown({
           >
             {t('Tiered price table')}
           </div>
+          {baseUSD && (
+            <p className='text-muted-foreground mb-2 text-xs'>
+              {t('Base prices in USD per 1M tokens')}
+            </p>
+          )}
           <div className='space-y-1.5 sm:hidden'>
             {tiers.map((tier) => {
               const condSummary = formatConditionSummary(tier.conditions, t)

@@ -102,6 +102,31 @@ function hasRatio(value: number | null | undefined): boolean {
   return value !== undefined && value !== null && Number.isFinite(Number(value))
 }
 
+/** Format a catalog base quote without wallet or recharge conversion. */
+export function formatBasePriceUSD(amount: number): string {
+  if (!Number.isFinite(amount)) return '-'
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: Math.abs(amount) >= 1 ? 4 : 6,
+  }).format(amount)
+}
+
+export function formatBaseModelPrice(
+  model: PricingModel,
+  type: PriceType,
+  tokenUnit: TokenUnit
+): string {
+  if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
+    return formatBasePriceUSD(model.model_price ?? 0)
+  }
+  return formatBasePriceUSD(
+    calculateTokenPrice(model, type, 1) / TOKEN_UNIT_DIVISORS[tokenUnit]
+  )
+}
+
 /**
  * Apply recharge rate to price
  *
