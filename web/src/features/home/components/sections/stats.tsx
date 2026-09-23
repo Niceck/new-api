@@ -99,13 +99,18 @@ export function Stats(_props: StatsProps) {
 
   const stats: StatItem[] = [
     // 真实值，随模型/分组倍率变动需同步更新。
-    // 2026-08-12 校准：11 个可用模型(Claude 8 + GPT-5.6 3)、
-    // 2 种协议(OpenAI / Anthropic)、分组倍率 0.1x(超级稳定线 0.25x)。
+    // 2026-09-23：13个在售模型（Claude 10 + GPT-6 3），
+    // 普通线路倍率0.40；超级稳定Claude为1.75，具体说明见首屏。
     // 首格刻意不展示上游线路数——供给结构不对外暴露。
     { end: 5, suffix: '', label: t('minutes to integrate') },
-    { end: 11, suffix: '', label: t('model billing support') },
+    { end: 13, suffix: '', label: t('model billing support') },
     { end: 2, suffix: '', label: t('compatible API routes') },
-    { end: 0.1, suffix: '×', decimals: 1, label: t('scheduling controls') },
+    {
+      end: 0.4,
+      suffix: '×',
+      decimals: 1,
+      label: t('ordinary line multiplier'),
+    },
   ]
 
   return (

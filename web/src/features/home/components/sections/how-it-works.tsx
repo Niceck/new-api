@@ -28,23 +28,21 @@ export function HowItWorks() {
     {
       num: '1',
       title: t('Configure'),
-      desc: t(
-        'Add your API keys, set up channels and configure access permissions'
-      ),
+      desc: t('Create a token and choose the group for your model.'),
       icon: <Settings className='size-6' strokeWidth={1.5} />,
     },
     {
       num: '2',
       title: t('Connect'),
       desc: t(
-        'Connect through OpenAI, Claude, Gemini, and other compatible API routes'
+        'Connect Claude Code or Codex using the model names in the catalog.'
       ),
       icon: <Zap className='size-6' strokeWidth={1.5} />,
     },
     {
       num: '3',
       title: t('Monitor'),
-      desc: t('Track usage, costs and performance with real-time analytics'),
+      desc: t('Check token usage, charges, and balance in the console.'),
       icon: <BarChart3 className='size-6' strokeWidth={1.5} />,
     },
   ]

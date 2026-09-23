@@ -41,31 +41,27 @@ export function Features(_props: FeaturesProps) {
     {
       id: 'fast',
       num: '01',
-      title: t('Lightning Fast'),
-      desc: t(
-        'Optimized network architecture ensures millisecond response times'
-      ),
+      title: t('Latest models'),
+      desc: t('Access Opus 5.5 and GPT-6 Astra, Sol, and Luna.'),
       span: 'md:col-span-2',
       icon: <Zap className='size-4 text-blue-400' />,
       visual: (
         <div className='mt-4 grid grid-cols-3 gap-2'>
           {[
-            'Opus 5',
-            'Fable 5',
+            'Opus 5.5',
+            'Fable 5.1',
             'Sonnet 5',
-            'Haiku 4.5',
-            'GPT-5.6',
-            'Codex',
-          ].map(
-            (name) => (
-              <div
-                key={name}
-                className='border-border/30 bg-muted/20 text-muted-foreground flex items-center justify-center rounded-lg border px-3 py-2 text-xs transition-colors duration-300 hover:border-blue-500/30 hover:bg-blue-500/5'
-              >
-                {name}
-              </div>
-            )
-          )}
+            'GPT-6 Astra',
+            'GPT-6 Sol',
+            'GPT-6 Luna',
+          ].map((name) => (
+            <div
+              key={name}
+              className='border-border/30 bg-muted/20 text-muted-foreground flex items-center justify-center rounded-lg border px-3 py-2 text-xs transition-colors duration-300 hover:border-blue-500/30 hover:bg-blue-500/5'
+            >
+              {name}
+            </div>
+          ))}
         </div>
       ),
     },
@@ -109,8 +105,8 @@ export function Features(_props: FeaturesProps) {
     {
       id: 'global',
       num: '03',
-      title: t('Global Coverage'),
-      desc: t('Multi-region deployment for stable global access'),
+      title: t('Claude and GPT'),
+      desc: t('Choose the right group for each model in the model catalog.'),
       span: 'md:col-span-1',
       icon: <Globe className='size-4 text-violet-400' />,
       visual: (
@@ -172,7 +168,7 @@ export function Features(_props: FeaturesProps) {
     {
       icon: <DollarSign className='size-5' strokeWidth={1.5} />,
       title: t('Transparent Billing'),
-      desc: t('Pay-as-you-go with real-time usage monitoring'),
+      desc: t('GPT-6 uses long-context rates above 272K input tokens.'),
     },
     {
       icon: <Users className='size-5' strokeWidth={1.5} />,
