@@ -62,7 +62,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		Group:     info.UsingGroup,
 		Other:     other,
 	})
-	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
+	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, ChargedQuota(info, info.PriceData.Quota))
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
 }
 
@@ -164,6 +164,9 @@ func taskModelName(task *model.Task) string {
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
+	if task.PrivateData.BillingCharge != nil && task.PrivateData.BillingCharge.Policy.Enabled {
+		return settleRoundedTask(ctx, task, 0, true, reason)
+	}
 	quota := task.Quota
 	if quota == 0 {
 		return true
@@ -208,6 +211,10 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
+	if task.PrivateData.BillingCharge != nil && task.PrivateData.BillingCharge.Policy.Enabled {
+		settleRoundedTask(ctx, task, actualQuota, false, reason, clamps...)
+		return
+	}
 	if actualQuota <= 0 {
 		return
 	}

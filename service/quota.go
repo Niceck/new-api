@@ -139,6 +139,41 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 
+	if _, err := PrepareBillingCharge(relayInfo, 0); err != nil {
+		return err
+	}
+	if relayInfo.BillingRounding.Enabled {
+		total, err := common.QuotaFromFloatStrict(float64(relayInfo.RealtimeRawQuota) + float64(quota))
+		if err != nil {
+			return err
+		}
+		charge, err := PrepareBillingCharge(relayInfo, total)
+		if err != nil {
+			return err
+		}
+		reserved := 0
+		if relayInfo.Billing != nil {
+			reserved = relayInfo.Billing.GetPreConsumedQuota()
+		}
+		needed := charge.ChargedQuota - reserved
+		if relayInfo.BillingSource != BillingSourceSubscription && needed > userQuota {
+			return fmt.Errorf("user quota is not enough for realtime reservation")
+		}
+		if !token.UnlimitedQuota && needed > token.RemainQuota {
+			return fmt.Errorf("token quota is not enough for realtime reservation")
+		}
+		if relayInfo.Billing == nil {
+			relayInfo.ForcePreConsume = true
+			if apiErr := PreConsumeBilling(ctx, total, relayInfo); apiErr != nil {
+				return apiErr
+			}
+		} else if err := relayInfo.Billing.Reserve(total); err != nil {
+			return err
+		}
+		relayInfo.RealtimeRawQuota = total
+		return nil
+	}
+
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
 	}
@@ -223,13 +258,14 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		logContent += "（可能是上游超时）"
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
-	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+	}
+	if totalTokens != 0 && relayInfo.BillingCharge != nil {
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, ChargedQuota(relayInfo, quota))
+		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
 	logModel := modelName
@@ -346,13 +382,14 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		logContent += "（可能是上游超时）"
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, relayInfo.FinalPreConsumedQuota))
-	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+	}
+	if totalTokens != 0 && relayInfo.BillingCharge != nil {
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, ChargedQuota(relayInfo, quota))
+		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
 	logModel := relayInfo.OriginModelName

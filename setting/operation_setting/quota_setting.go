@@ -3,6 +3,7 @@ package operation_setting
 import "github.com/QuantumNous/new-api/setting/config"
 
 type QuotaSetting struct {
+	RoundChargeToCNYCent      bool `json:"round_charge_to_cny_cent"`      // 每笔总费用按人民币分向上取整（默认关闭）
 	EnableFreeModelPreConsume bool `json:"enable_free_model_pre_consume"` // 是否对免费模型启用预消耗
 }
 

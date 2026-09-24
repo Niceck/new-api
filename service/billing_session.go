@@ -44,9 +44,18 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if s.settled {
 		return nil
 	}
+	if s.refunded {
+		return fmt.Errorf("cannot settle refunded billing session")
+	}
+	charge, err := PrepareBillingCharge(s.relayInfo, actualQuota)
+	if err != nil {
+		return err
+	}
+	actualQuota = charge.ChargedQuota
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
 		s.settled = true
+		s.relayInfo.BillingCharge = charge
 		return nil
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
@@ -56,6 +65,7 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		}
 		s.fundingSettled = true
 	}
+	s.relayInfo.BillingCharge = charge
 	// 2) 调整令牌额度
 	var tokenErr error
 	if !s.relayInfo.IsPlayground {
@@ -153,7 +163,15 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.settled || s.refunded || s.trusted || targetQuota <= s.preConsumedQuota {
+	if s.settled || s.refunded || s.trusted {
+		return nil
+	}
+	charge, err := PrepareBillingCharge(s.relayInfo, targetQuota)
+	if err != nil {
+		return err
+	}
+	targetQuota = charge.ChargedQuota
+	if targetQuota <= s.preConsumedQuota {
 		return nil
 	}
 
@@ -289,6 +307,9 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 		return false
 	}
 
+	if s.relayInfo.BillingRounding != nil && s.relayInfo.BillingRounding.Enabled {
+		return false
+	}
 	trustQuota := common.GetTrustQuota()
 	if trustQuota <= 0 {
 		return false
@@ -348,6 +369,11 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	charge, chargeErr := PrepareBillingCharge(relayInfo, preConsumedQuota)
+	if chargeErr != nil {
+		return nil, types.NewError(chargeErr, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry())
+	}
+	preConsumedQuota = charge.ChargedQuota
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
 
 	// 钱包路径需要先检查用户额度

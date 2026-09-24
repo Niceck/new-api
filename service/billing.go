@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -49,6 +50,21 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	charge, err := PrepareBillingCharge(relayInfo, actualQuota)
+	if err != nil {
+		// Upstream may already have accepted an async task. Persist only funds
+		// actually reserved so a later failure cannot refund an uncharged total.
+		if relayInfo != nil && relayInfo.BillingRounding != nil && relayInfo.BillingCharge == nil {
+			reserved := relayInfo.FinalPreConsumedQuota
+			if relayInfo.Billing != nil {
+				reserved = relayInfo.Billing.GetPreConsumedQuota()
+			}
+			relayInfo.BillingCharge = &common.BillingCharge{RawQuota: actualQuota, ChargedQuota: reserved, Policy: *relayInfo.BillingRounding, SettlementError: "charge_calculation_failed"}
+		}
+		return err
+	}
+	rawQuota := actualQuota
+	actualQuota = charge.ChargedQuota
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
@@ -71,7 +87,12 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			))
 		}
 
-		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+		if err := relayInfo.Billing.Settle(rawQuota); err != nil {
+			if relayInfo.BillingCharge == nil {
+				charge.ChargedQuota = preConsumed
+				charge.SettlementError = "settlement_failed"
+				relayInfo.BillingCharge = charge
+			}
 			return err
 		}
 
@@ -86,10 +107,16 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		return nil
 	}
 
+	if relayInfo.BillingCharge != nil {
+		return nil
+	} // already settled by the fallback
 	// 回退：无 BillingSession 时使用旧路径
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+		if err := PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true); err != nil {
+			return err
+		}
 	}
+	relayInfo.BillingCharge = charge
 	return nil
 }
