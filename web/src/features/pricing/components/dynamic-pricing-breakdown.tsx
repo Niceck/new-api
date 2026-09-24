@@ -50,6 +50,8 @@ type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
   /** Catalog base quotes use USD; usage logs keep the configured currency. */
   baseUSD?: boolean
+  /** Settled log multiplier, including any user-exclusive override. */
+  groupRatio?: number
   /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
@@ -176,6 +178,7 @@ export function DynamicPricingBreakdown({
   hideCacheColumns = false,
   compact = false,
   baseUSD = false,
+  groupRatio = 1,
 }: DynamicPricingBreakdownProps) {
   const { t } = useTranslation()
   const expr = billingExpr || ''
@@ -345,7 +348,7 @@ export function DynamicPricingBreakdown({
                             )}
                           >
                             {value > 0
-                              ? `${symbol}${(value * rate).toFixed(4)}`
+                              ? `${symbol}${(value * rate * groupRatio).toFixed(4)}`
                               : '-'}
                           </div>
                         </div>
@@ -434,7 +437,7 @@ export function DynamicPricingBreakdown({
                   )
                   return value > 0 ? (
                     <span className={cn(!compact && 'font-semibold')}>
-                      {`${symbol}${(value * rate).toFixed(4)}`}
+                      {`${symbol}${(value * rate * groupRatio).toFixed(4)}`}
                     </span>
                   ) : (
                     '-'

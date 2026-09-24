@@ -37,8 +37,17 @@ const domGlobals = [
   'requestAnimationFrame',
   'cancelAnimationFrame',
   'getComputedStyle',
+  'Document',
+  'ShadowRoot',
+  'customElements',
 ] as const
 
+const originalDescriptors = new Map(
+  domGlobals.map((key) => [
+    key,
+    Object.getOwnPropertyDescriptor(globalThis, key),
+  ])
+)
 for (const key of domGlobals) {
   Object.defineProperty(globalThis, key, {
     configurable: true,
@@ -71,11 +80,16 @@ await i18n.use(initReactI18next).init({
   },
 })
 
+const { DynamicPricingBreakdown } =
+  await import('@/features/pricing/components/dynamic-pricing-breakdown')
+const { useSystemConfigStore, DEFAULT_CURRENCY_CONFIG } =
+  await import('@/stores/system-config-store')
 const { BillingBreakdown } = await import('../dialogs/details-dialog')
 const { formatBillingCurrencyFromUSD } = await import('@/lib/currency')
 const reactTestGlobals = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean
 }
+const originalActEnvironment = reactTestGlobals.IS_REACT_ACT_ENVIRONMENT
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
 const PRICE_OPTS = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
@@ -117,10 +131,6 @@ function price(usd: number): string {
 }
 
 describe('billing breakdown prices', () => {
-  after(() => {
-    domWindow.close()
-  })
-
   // The HQ line runs at a group ratio above 1, so a missing multiplier is
   // visible as an under-reported price rather than a rounding difference.
   test('multiplies per-token prices by the group ratio actually charged', async () => {
@@ -196,4 +206,136 @@ describe('billing breakdown prices', () => {
 
     await unmount(rendered)
   })
+})
+
+test('non-Claude ratio logs with cache usage show the charged cache read price', async () => {
+  const rendered = await renderBreakdown({
+    log: { quota: 400 } as React.ComponentProps<typeof BillingBreakdown>['log'],
+    other: {
+      model_ratio: 1,
+      completion_ratio: 5,
+      group_ratio: 0.4,
+      cache_tokens: 1000,
+      cache_ratio: 0.1,
+    },
+    isAdmin: false,
+  })
+  try {
+    assert.ok(text(rendered).includes(`CacheRead${price(0.08)}/M`))
+  } finally {
+    await unmount(rendered)
+  }
+})
+
+for (const [name, input, output] of [
+  ['astra', 10, 50],
+  ['sol', 2, 10],
+  ['luna', 0.1, 0.5],
+] as const) {
+  for (const [tier, pin, pout] of [
+    ['standard', input, output],
+    ['long_context', input * 2, output * 1.5],
+  ] as const) {
+    test(`${name} ${tier} billing details use the expression snapshot instead of legacy ratios`, async () => {
+      const expr = `len <= 272000 ? tier("standard", p * ${input} + c * ${output}) : tier("long_context", p * ${input * 2} + c * ${output * 1.5})`
+      const rendered = await renderBreakdown({
+        log: { quota: 400 } as React.ComponentProps<
+          typeof BillingBreakdown
+        >['log'],
+        other: {
+          model_ratio: 1,
+          completion_ratio: 5,
+          group_ratio: 0.4,
+          billing_mode: 'tiered_expr',
+          expr_b64: btoa(expr),
+          matched_tier: tier,
+        },
+        isAdmin: false,
+      })
+      try {
+        assert.ok(text(rendered).includes(`Input${price(pin * 0.4)}/M`))
+        assert.ok(text(rendered).includes(`Output${price(pout * 0.4)}/M`))
+      } finally {
+        await unmount(rendered)
+      }
+    })
+  }
+}
+
+for (const ratio of [0.4, 1.75, 0]) {
+  test(`usage-log tier table applies settled multiplier ${ratio} to desktop and mobile prices`, async () => {
+    const initialConfig = useSystemConfigStore.getState().config
+    useSystemConfigStore.setState({
+      config: {
+        ...initialConfig,
+        currency: {
+          ...DEFAULT_CURRENCY_CONFIG,
+          quotaDisplayType: 'CNY',
+          usdExchangeRate: 1,
+        },
+      },
+    })
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () =>
+        root.render(
+          <I18nextProvider i18n={i18n}>
+            <DynamicPricingBreakdown
+              compact
+              groupRatio={ratio}
+              billingExpr='tier("standard", p * 10 + c * 50 + cr * 1)'
+            />
+          </I18nextProvider>
+        )
+      )
+      const amounts = [...container.querySelectorAll('span, div')]
+        .filter((node) => node.children.length === 0)
+        .map((node) => node.textContent)
+      for (const base of [10, 50, 1]) {
+        assert.equal(
+          amounts.filter((value) => value === `¥${(base * ratio).toFixed(4)}`)
+            .length,
+          ratio === 0 ? 6 : 2
+        )
+      }
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+      useSystemConfigStore.setState({ config: initialConfig })
+    }
+  })
+}
+
+after(() => {
+  domWindow.close()
+  reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
+  for (const key of domGlobals) {
+    const descriptor = originalDescriptors.get(key)
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+    else Reflect.deleteProperty(globalThis, key)
+  }
+})
+
+test('structured tool surcharges show per-call price and subtotal using the settled group ratio', async () => {
+  const rendered = await renderBreakdown({
+    log: { quota: 17500 } as React.ComponentProps<
+      typeof BillingBreakdown
+    >['log'],
+    other: {
+      model_ratio: 5,
+      completion_ratio: 5,
+      group_ratio: 1.75,
+      tool_surcharges: [{ name: 'web_search', count: 2, price: 10 }],
+    },
+    isAdmin: false,
+  })
+  try {
+    const content = text(rendered)
+    assert.ok(content.includes('web_search'))
+    assert.ok(content.includes(`2×${price(0.0175)}=${price(0.035)}`), content)
+  } finally {
+    await unmount(rendered)
+  }
 })

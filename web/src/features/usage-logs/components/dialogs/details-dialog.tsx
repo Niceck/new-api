@@ -225,7 +225,6 @@ export function BillingBreakdown(props: {
   const { t } = useTranslation()
   const { log, other, isAdmin } = props
   const isPerCall = isPerCallBilling(other.model_price)
-  const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
 
@@ -295,7 +294,7 @@ export function BillingBreakdown(props: {
     })
   }
 
-  if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
+  if (!isTieredExpr && !isPerCall && hasAnyCacheTokens(other)) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({
         label: t('Cache Read'),
@@ -355,6 +354,14 @@ export function BillingBreakdown(props: {
         value: `${fmtPrice(baseInputUSD * other.image_ratio)}/M`,
       })
     }
+  }
+
+  // Structured tool prices are stored per 1,000 calls by settlement.
+  for (const item of other.tool_surcharges ?? []) {
+    rows.push({
+      label: `${t('Includes tool-call surcharge')} (${item.name})`,
+      value: `${item.count} × ${fmtPrice(item.price / 1000)} = ${fmtPrice((item.price * item.count) / 1000)}`,
+    })
   }
 
   if (other.web_search && other.web_search_call_count) {
@@ -1083,6 +1090,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
               billingExpr={decodeBillingExprB64(other.expr_b64)}
               matchedTierLabel={other.matched_tier}
               requestRules={other.request_rules}
+              groupRatio={getLogGroupRatio(other).multiplier}
               hideCacheColumns={!hasAnyCacheTokens(other)}
             />
           </DetailSection>
