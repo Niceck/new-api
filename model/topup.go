@@ -318,6 +318,105 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 	return topups, total, nil
 }
 
+// decimalQuotaForAmount 把易支付口径的美元数量换算成额度。
+// 易支付订单的 Amount 是美元数量，额度 = Amount * QuotaPerUnit。
+func decimalQuotaForAmount(amount int64) int64 {
+	return decimal.NewFromInt(amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart()
+}
+
+// RechargeEpay 完成易支付订单并入账，订单状态与用户额度在同一事务内落库。
+//
+// 返回本次实际入账的额度：重投（订单已 success）返回 0，便于调用方区分
+// 「首次入账」与「幂等重投」而不必再查库。
+//
+// 为什么必须是事务：webhook 只有一次交付机会——平台收到 success 应答后不再重投。
+// 若订单先标成功、额度另起一个事务再加，中间失败就变成「订单成功但没到账」
+// （reconcile_topup.py 的形态 B），只能靠人工补单。与 Recharge(Stripe)、
+// RechargeCreem 同构：行级锁 + 幂等判定 + 行内 quota + ?。
+func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (creditedQuota int, err error) {
+	if tradeNo == "" {
+		return 0, errors.New("未提供支付单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	var userId int
+	var payMoney float64
+	var storedPaymentMethod string
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		// 行级锁：并发回调与管理员补单串行化，避免双重入账。
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		// provider 隔离：TRON 等独立网关有自己的结算路径，不得在此处理。
+		if topUp.PaymentProvider != PaymentProviderEpay {
+			return ErrPaymentMethodMismatch
+		}
+		// 幂等：平台重投时订单已 success，直接返回且不再入账。
+		if topUp.Status == common.TopUpStatusSuccess {
+			creditedQuota = 0
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		quotaToAdd := decimalQuotaForAmount(topUp.Amount)
+		if quotaToAdd <= 0 || quotaToAdd > int64(common.MaxQuota) {
+			return errors.New("无效的充值额度")
+		}
+
+		// 钱包上限：先读当前额度再判断，越界则整单回滚而不是部分入账。
+		user := &User{}
+		if err := lockForUpdate(tx).Select("id", "quota").Where("id = ?", topUp.UserId).First(user).Error; err != nil {
+			return err
+		}
+		if int64(user.Quota) > int64(common.MaxQuota)-quotaToAdd {
+			return errors.New("充值后额度超出上限，请联系管理员")
+		}
+
+		// 实际支付方式可能与下单时不同，落库记实际值。
+		if actualPaymentMethod != "" && topUp.PaymentMethod != actualPaymentMethod {
+			topUp.PaymentMethod = actualPaymentMethod
+		}
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).
+			Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+
+		creditedQuota = int(quotaToAdd)
+		userId = topUp.UserId
+		payMoney = topUp.Money
+		storedPaymentMethod = topUp.PaymentMethod
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	if creditedQuota > 0 {
+		// 缓存与日志都放在提交之后：事务未提交就刷缓存会让失败回滚留下脏额度。
+		if common.RedisEnabled {
+			if cacheErr := cacheIncrUserQuota(userId, int64(creditedQuota)); cacheErr != nil {
+				common.SysError("failed to increase cached user quota after epay topup: " + cacheErr.Error())
+			}
+		}
+		RecordTopupLog(userId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.FormatQuota(creditedQuota), payMoney), callerIp, storedPaymentMethod, PaymentProviderEpay)
+	}
+	return creditedQuota, nil
+}
+
 // ManualCompleteTopUp 管理员手动完成订单并给用户充值
 func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	if tradeNo == "" {
