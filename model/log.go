@@ -113,20 +113,82 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 	}
 }
 
+// userVisibleLogOtherKeys 是普通用户可见的 logs.other 顶层键白名单。
+//
+// 为什么是白名单：other 的写入点散布在 service/ 与 controller/ 十多处
+// （log_info_generate.go、cent_rounding.go、text_quota.go、task_billing.go、
+// relay.go 等）。黑名单下每个新增字段都默认泄露，机制上无法收敛——
+// channel_id/channel_name/channel_type 正是这样漏出去的：relay.go 把它们
+// 写在 other 顶层，而旧实现只 delete admin_info / audit_info 两个嵌套键。
+//
+// 新增面向用户的 other 字段时，必须同时在此登记，否则用户侧看不到。
+// 内部/管理员字段不要登记：admin_info、audit_info、reject_reason 以及
+// channel_* 一律不在此列。
+var userVisibleLogOtherKeys = map[string]struct{}{
+	// 倍率与价格
+	"model_ratio": {}, "group_ratio": {}, "completion_ratio": {},
+	"user_group_ratio": {}, "model_price": {},
+	// 缓存计费
+	"cache_tokens": {}, "cache_ratio": {}, "cache_write_tokens": {},
+	"cache_creation_tokens": {}, "cache_creation_ratio": {},
+	"cache_creation_tokens_5m": {}, "cache_creation_ratio_5m": {},
+	"cache_creation_tokens_1h": {}, "cache_creation_ratio_1h": {},
+	// 请求形态
+	"frt": {}, "request_path": {}, "claude": {}, "ws": {},
+	"is_model_mapped": {}, "upstream_model_name": {},
+	"reasoning_effort": {}, "is_system_prompt_overwritten": {},
+	"request_conversion": {}, "usage_semantic": {}, "input_tokens_total": {},
+	// 人民币分取整（本站定制，用户需要看到实收口径）
+	"charge_rounding": {}, "charge_rounding_previous": {}, "charged_delta": {},
+	// 阶梯计费
+	"billing_mode": {}, "expr_b64": {}, "matched_tier": {}, "request_rules": {},
+	// 钱包 / 订阅
+	"billing_source": {}, "billing_preference": {}, "wallet_quota_deducted": {},
+	"subscription_id": {}, "subscription_pre_consumed": {},
+	"subscription_post_delta": {}, "subscription_plan_id": {},
+	"subscription_plan_title": {}, "subscription_total": {},
+	"subscription_used": {}, "subscription_remain": {},
+	"subscription_consumed": {},
+	// 音频
+	"audio": {}, "audio_input": {}, "audio_output": {},
+	"text_input": {}, "text_output": {},
+	"audio_ratio": {}, "audio_completion_ratio": {},
+	"audio_input_price": {}, "audio_input_seperate_price": {},
+	"audio_input_token_count": {},
+	// 图像与工具加价
+	"image": {}, "image_ratio": {}, "image_output": {}, "tool_surcharges": {},
+	// 异步任务
+	"is_task": {}, "task_id": {}, "reason": {},
+	"pre_consumed_quota": {}, "actual_quota": {},
+	// 流状态与参数覆盖：前端对日志所有者展示，不含上游身份信息
+	"stream_status": {}, "po": {},
+	// 错误摘要（面向用户的失败原因，不含渠道身份）
+	"error_type": {}, "error_code": {}, "status_code": {},
+	// 登录/操作审计（RecordLoginLog，普通用户可见自己的记录）
+	"op": {}, "login_method": {}, "user_agent": {},
+	// 受控聊天正文（LOG_CHAT_CONTENT_ENABLED；30 天后由清理任务剥键）
+	"chat_content": {},
+}
+
+// projectUserLogOther 按白名单投影单条日志的 other，返回新 map 而不改原对象。
+func projectUserLogOther(otherMap map[string]interface{}) map[string]interface{} {
+	if otherMap == nil {
+		return nil
+	}
+	projected := make(map[string]interface{}, len(otherMap))
+	for key, value := range otherMap {
+		if _, ok := userVisibleLogOtherKeys[key]; ok {
+			projected[key] = value
+		}
+	}
+	return projected
+}
+
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
-		var otherMap map[string]interface{}
-		otherMap, _ = common.StrToMap(logs[i].Other)
-		if otherMap != nil {
-			// Remove admin-only debug fields.
-			delete(otherMap, "admin_info")
-			// Remove operation-audit details (operator/route info), admin-only.
-			delete(otherMap, "audit_info")
-			// delete(otherMap, "reject_reason")
-			// delete(otherMap, "stream_status")
-		}
-		logs[i].Other = common.MapToJsonStr(otherMap)
+		otherMap, _ := common.StrToMap(logs[i].Other)
+		logs[i].Other = common.MapToJsonStr(projectUserLogOther(otherMap))
 	}
 	assignDisplayLogIds(logs, startIdx)
 }
