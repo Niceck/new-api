@@ -73,12 +73,15 @@ func withEpayTestMySQL(t *testing.T, fn func()) {
 	fn()
 }
 
-// cleanEpayRows 清掉本用例的数据，允许反复运行。
+// cleanEpayRows 清掉本用例的数据，允许反复运行（含 -count=N）。
+//
+// 必须用 Unscoped：User 带 DeletedAt，普通 Delete 是软删除，行仍物理存在，
+// 下一轮以同一主键 Create 会撞 Error 1062 Duplicate entry。
 func cleanEpayRows(t *testing.T, tradeNo string, userId int) {
 	t.Helper()
-	require.NoError(t, DB.Where("trade_no = ?", tradeNo).Delete(&TopUp{}).Error)
-	require.NoError(t, DB.Where("id = ?", userId).Delete(&User{}).Error)
-	require.NoError(t, DB.Where("user_id = ?", userId).Delete(&Log{}).Error)
+	require.NoError(t, DB.Unscoped().Where("trade_no = ?", tradeNo).Delete(&TopUp{}).Error)
+	require.NoError(t, DB.Unscoped().Where("id = ?", userId).Delete(&User{}).Error)
+	require.NoError(t, DB.Unscoped().Where("user_id = ?", userId).Delete(&Log{}).Error)
 }
 
 // 真实 MySQL 下 lockForUpdate 必须让并发回调串行，只有一个入账。
