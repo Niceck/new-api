@@ -1276,11 +1276,24 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 }
 
 func increaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota)).Error
-	if err != nil {
-		return err
+	return applyUserQuotaDelta(id, quota)
+}
+
+// applyUserQuotaDelta 把额度增量写入用户行，并要求确实命中一行。
+//
+// 为什么检查 RowsAffected：用户被删除后 UPDATE 影响 0 行，GORM 不报错，
+// 调用方会把「额度没落库」当成成功，退款与入账静默丢失且无留痕。
+// 注意这里不设余额门槛——余额可为负是本站刻意设计（见 service/billing_session.go
+// 的钱包预扣注释），欠费语义必须保持不变。
+func applyUserQuotaDelta(id int, delta int) error {
+	result := DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", delta))
+	if result.Error != nil {
+		return result.Error
 	}
-	return err
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("更新用户 %d 额度未命中记录: %w", id, gorm.ErrRecordNotFound)
+	}
+	return nil
 }
 
 func DecreaseUserQuota(id int, quota int, db bool) (err error) {
@@ -1301,11 +1314,7 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
-	if err != nil {
-		return err
-	}
-	return err
+	return applyUserQuotaDelta(id, -quota)
 }
 
 func DeltaUpdateUserQuota(id int, delta int) (err error) {

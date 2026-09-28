@@ -422,14 +422,27 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 }
 
 func increaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
+	return applyTokenQuotaDelta(id, quota)
+}
+
+// applyTokenQuotaDelta 把额度增量写入令牌行，并要求确实命中一行。
+// 与 applyUserQuotaDelta 同理：令牌被删除后 UPDATE 影响 0 行而不报错，
+// 会让调用方把未落库的扣减/退还当成成功。不设余额门槛，欠费语义不变。
+func applyTokenQuotaDelta(id int, delta int) error {
+	result := DB.Model(&Token{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
-			"used_quota":    gorm.Expr("used_quota - ?", quota),
+			"remain_quota":  gorm.Expr("remain_quota + ?", delta),
+			"used_quota":    gorm.Expr("used_quota - ?", delta),
 			"accessed_time": common.GetTimestamp(),
 		},
-	).Error
-	return err
+	)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("更新令牌 %d 额度未命中记录: %w", id, gorm.ErrRecordNotFound)
+	}
+	return nil
 }
 
 func DecreaseTokenQuota(id int, key string, quota int) (err error) {
@@ -452,14 +465,7 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 }
 
 func decreaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
-			"used_quota":    gorm.Expr("used_quota + ?", quota),
-			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
+	return applyTokenQuotaDelta(id, -quota)
 }
 
 // CountUserTokens returns total number of tokens for the given user, used for pagination
