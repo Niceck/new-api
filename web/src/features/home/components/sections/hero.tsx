@@ -111,7 +111,7 @@ export function Hero(props: HeroProps) {
               <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75' />
               <span className='relative inline-flex size-1.5 rounded-full bg-blue-500 dark:bg-blue-400' />
             </span>
-            <span>{t('Opus 5.5 and GPT-6 · Pay as you go')}</span>
+            <span>{t('Sonnet 5.5 now live · Pay as you go')}</span>
           </div>
 
           <h1
@@ -129,7 +129,7 @@ export function Hero(props: HeroProps) {
             style={{ animationDelay: '120ms' }}
           >
             {t(
-              'Opus 5.5 on stable Claude; GPT-6 Astra, Sol and Luna on the pro line. Multipliers: ordinary 0.40, stable Claude 1.75. GPT-6 uses two pricing tiers at 272K input tokens. See the model catalog for details.'
+              'Claude now offers Opus 5.5, Sonnet 5.5 and Fable 5.1; GPT-6 Astra, Sol and Luna are on the pro line. Multipliers: ordinary 0.40, stable Claude 1.75. GPT-6 uses two pricing tiers at 272K input tokens. See the model catalog for models by group and pricing.'
             )}
           </p>
 

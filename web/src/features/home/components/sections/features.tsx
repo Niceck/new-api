@@ -42,15 +42,15 @@ export function Features(_props: FeaturesProps) {
       id: 'fast',
       num: '01',
       title: t('Latest models'),
-      desc: t('Access Opus 5.5 and GPT-6 Astra, Sol, and Luna.'),
+      desc: t('Access Opus 5.5, Sonnet 5.5, and GPT-6 Astra, Sol, and Luna.'),
       span: 'md:col-span-2',
       icon: <Zap className='size-4 text-blue-400' />,
       visual: (
         <div className='mt-4 grid grid-cols-3 gap-2'>
           {[
             'Opus 5.5',
+            'Sonnet 5.5',
             'Fable 5.1',
-            'Sonnet 5',
             'GPT-6 Astra',
             'GPT-6 Sol',
             'GPT-6 Luna',
