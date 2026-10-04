@@ -627,6 +627,9 @@ func handleConfigUpdate(key, value string) bool {
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
 		ratio_setting.InvalidateExposedDataCache()
+	} else if configName == "general_setting" {
+		// 请求路径读的是快照，不是结构体字段（见 RefreshStreamHeaderPolicy）
+		operation_setting.RefreshStreamHeaderPolicy()
 	}
 
 	return true // 已处理

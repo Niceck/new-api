@@ -488,6 +488,14 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	headerWait := streamHeaderWaitFor(c, info)
+	if headerWait.exhausted {
+		// 等响应头的总预算已用尽：不再向上游发请求，也不再重试，把错误尽快交还
+		logger.LogError(c, "do request skipped: stream header budget exhausted")
+		return nil, types.NewError(errResponseHeaderTimeout, types.ErrorCodeDoRequestFailed,
+			types.ErrOptionWithHideErrMsg("upstream error: response header timeout"),
+			types.ErrOptionWithSkipRetry())
+	}
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
@@ -529,10 +537,14 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
-	resp, err := relayClient.Do(req)
+	resp, err := doWithHeaderTimeout(&relayClient, req, headerWait.timeout)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
-		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
+		hideMsg := "upstream error: do request failed"
+		if errors.Is(err, errResponseHeaderTimeout) {
+			hideMsg = "upstream error: response header timeout"
+		}
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg(hideMsg))
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")

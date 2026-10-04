@@ -9,6 +9,9 @@ const (
 
 	ContextKeyOriginalModel    ContextKey = "original_model"
 	ContextKeyRequestStartTime ContextKey = "request_start_time"
+	// 请求进站的时间（入口中间件记录）。RequestStartTime 是鉴权、读完请求体、
+	// 选完渠道之后才记的；要对齐前置网关的超时，得从进站起算。
+	ContextKeyRequestEntryTime ContextKey = "request_entry_time"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"
