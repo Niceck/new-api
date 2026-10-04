@@ -30,6 +30,7 @@ import { toast } from 'sonner'
 
 import { getStatus } from '@/lib/api'
 import { installBuildMetadata } from '@/lib/build-metadata'
+import { resolveDocumentTitle } from '@/lib/document-title'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
@@ -117,12 +118,16 @@ if (!rootElement) {
 ;(function initSystemBranding() {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
+    // index.html may carry a full title ("<site name> - <tagline>"); keep it
+    // when it leads with the site name instead of shrinking it to the name.
+    const staticTitle = document.title
     const apply = (name: string) => {
-      document.title = name
+      const title = resolveDocumentTitle(staticTitle, name)
+      document.title = title
       const metaTitle = document.querySelector(
         'meta[name="title"]'
       ) as HTMLMetaElement | null
-      if (metaTitle) metaTitle.setAttribute('content', name)
+      if (metaTitle) metaTitle.setAttribute('content', title)
     }
     // Cache-first
     try {

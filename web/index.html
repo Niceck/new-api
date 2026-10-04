@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
@@ -7,12 +7,20 @@
     <meta name="google" content="notranslate" />
 
     <!-- Primary Meta Tags -->
-    <title>New API</title>
-    <meta name="title" content="New API" />
-    <meta
-      name="description"
-      content="Unified AI API gateway and admin dashboard."
-    />
+    <!-- The title leads with the site name so the app keeps it at runtime
+         (see src/lib/document-title.ts). No canonical here: this shell is
+         served for every SPA route. -->
+    <title>CC API - Claude Code / Codex API 中转站｜Claude 官转约 2.5 折</title>
+    <meta name="title" content="CC API - Claude Code / Codex API 中转站｜Claude 官转约 2.5 折" />
+    <meta name="description" content="CC API 提供 Claude、GPT-6 与 DeepSeek / MiMo Flash 模型的 API 中转，支持官方 Claude Code、Codex CLI 等客户端，人民币按量计费。Claude 超级稳定线路倍率 1.75（约官网价 2.5 折），GPT-6 倍率 0.40（约 0.6 折），国产 Flash 官网价 5 折。" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CC API" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="CC API - Claude Code / Codex API 中转站｜Claude 官转约 2.5 折" />
+    <meta property="og:description" content="CC API 提供 Claude、GPT-6 与 DeepSeek / MiMo Flash 模型的 API 中转，支持官方 Claude Code、Codex CLI 等客户端，人民币按量计费。Claude 超级稳定线路倍率 1.75（约官网价 2.5 折），GPT-6 倍率 0.40（约 0.6 折），国产 Flash 官网价 5 折。" />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://cc.yzzt.top/#org","name":"CC API","url":"https://cc.yzzt.top/","logo":"https://cc.yzzt.top/logo.svg","description":"CC API 是面向开发者的 AI 模型 API 中转服务，提供 Claude、GPT-6 与国产 Flash 模型，支持 Claude Code、Codex CLI 等客户端，人民币按量计费。"},{"@type":"WebSite","@id":"https://cc.yzzt.top/#website","name":"CC API","url":"https://cc.yzzt.top/","inLanguage":"zh-CN","publisher":{"@id":"https://cc.yzzt.top/#org"}}]}</script>
 
     <meta name="theme-color" content="#fff" />
     <!--umami-->
@@ -20,6 +28,22 @@
   </head>
 
   <body>
+    <!-- #root must stay empty: main.tsx only mounts the app into an empty root. -->
     <div id="root" translate="no" class="notranslate"></div>
+    <noscript>
+      <h1>CC API - Claude Code / Codex API 中转站</h1>
+      <p>CC API 提供 Claude、GPT-6 与 DeepSeek / MiMo Flash 模型的 API 中转，支持官方 Claude Code、Codex CLI 等客户端，人民币按量计费。Claude 超级稳定线路倍率 1.75（约官网价 2.5 折），GPT-6 倍率 0.40（约 0.6 折），国产 Flash 官网价 5 折。</p>
+      <ul>
+        <li><a href="/claude-api">Claude API 中转接入</a></li>
+        <li><a href="/claude-code">Claude Code 接入教程</a></li>
+        <li><a href="/codex-api">Codex CLI 与 GPT-6 API 接入</a></li>
+        <li><a href="/flash-api">DeepSeek / MiMo Flash API 接入</a></li>
+        <li><a href="/api-pricing">模型与价格</a></li>
+        <li><a href="/faq">常见问题</a></li>
+        <li><a href="/about-cc-api">关于 CC API</a></li>
+        <li><a href="/docs/">配置文档</a></li>
+      </ul>
+      <p>控制台与模型广场需要启用 JavaScript。</p>
+    </noscript>
   </body>
 </html>
