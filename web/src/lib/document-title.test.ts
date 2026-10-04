@@ -25,8 +25,14 @@ describe('document title once the site name is known', () => {
   test('keeps a static title that leads with the site name', () => {
     const full = 'CC API - Claude Code / Codex API 中转站｜Claude 官转约 2.5 折'
     assert.equal(resolveDocumentTitle(full, 'CC API'), full)
-    assert.equal(resolveDocumentTitle('CC API｜中转站', 'CC API'), 'CC API｜中转站')
-    assert.equal(resolveDocumentTitle('  CC API · 中转站  ', ' CC API '), 'CC API · 中转站')
+    assert.equal(
+      resolveDocumentTitle('CC API｜中转站', 'CC API'),
+      'CC API｜中转站'
+    )
+    assert.equal(
+      resolveDocumentTitle('  CC API · 中转站  ', ' CC API '),
+      'CC API · 中转站'
+    )
   })
 
   test('replaces the stock title with the site name', () => {
@@ -42,6 +48,13 @@ describe('document title once the site name is known', () => {
     )
   })
 
+  test('a shortened site name does not keep the old title', () => {
+    assert.equal(
+      resolveDocumentTitle('CC API - Claude Code 中转站', 'CC'),
+      'CC'
+    )
+  })
+
   test('a longer name sharing the prefix is not the same site', () => {
     assert.equal(resolveDocumentTitle('CC APIX - 中转站', 'CC API'), 'CC API')
   })
@@ -51,6 +64,9 @@ describe('document title once the site name is known', () => {
   })
 
   test('an empty site name never blanks the title', () => {
-    assert.equal(resolveDocumentTitle('CC API - 中转站', '   '), 'CC API - 中转站')
+    assert.equal(
+      resolveDocumentTitle('CC API - 中转站', '   '),
+      'CC API - 中转站'
+    )
   })
 })

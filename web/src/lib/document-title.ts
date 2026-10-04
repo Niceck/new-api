@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-const SEPARATOR = /^[\s\-–—|｜·:：]/
+// What may follow the site name in a static title: optional spaces, then a
+// separator. A bare space is not enough, or shortening the name in settings
+// ("CC API" -> "CC") would keep the old title.
+const SEPARATOR = /^\s*[-–—|｜·:：]/
 
 /**
  * Decide the tab title once the site name is known.
