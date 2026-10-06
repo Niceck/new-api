@@ -332,8 +332,21 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
+// clientGone 报告入站请求是否已被取消（客户端断开，或前置代理放弃了这次请求）。
+func clientGone(c *gin.Context) bool {
+	return c != nil && c.Request != nil && c.Request.Context().Err() != nil
+}
+
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
+		return false
+	}
+	// 客户端已经断开：不再发起新的尝试。没人在等回复，再发一次只会白耗上游；
+	// 重试若成功，还要向客户收一笔他收不到的回复的钱。
+	// 必须排在渠道类错误「无条件重试」之前。只拦下一次尝试，不取消正在进行的那一次：
+	// 那一次以错误结束会全额退预扣，而上游未必因我方断开就不计费。
+	if clientGone(c) {
+		logger.LogInfo(c, "client disconnected, skip retry")
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
@@ -626,6 +639,11 @@ func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskError, retryTimes int) bool {
 	if taskErr == nil {
+		return false
+	}
+	// 与 shouldRetry 同一口径：客户端已断开就不再提交新的尝试。
+	if clientGone(c) {
+		logger.LogInfo(c, "client disconnected, skip task retry")
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
