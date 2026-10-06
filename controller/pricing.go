@@ -8,6 +8,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// viewerGroup 返回当前访问者的用户分组；未登录或读不到用户时为空串。
+func viewerGroup(c *gin.Context) string {
+	userId, exists := c.Get("id")
+	if !exists {
+		return ""
+	}
+	id, ok := userId.(int)
+	if !ok {
+		return ""
+	}
+	user, err := model.GetUserCache(id)
+	if err != nil {
+		return ""
+	}
+	return user.Group
+}
+
+// filterPricingByUsableGroups 只留下访问者至少有一个可用分组的模型，并把每个模型的
+// EnableGroup 裁到访问者的可用分组。不裁的话，不对客的分组（在倍率表里、有渠道，但不在
+// UserUsableGroups，如管理员专用线）会随同名模型出现在所有人的模型广场分组徽章里。
+// pricing 是 model.GetPricing() 的共享缓存，EnableGroup 还被 modelEnableGroups 引用：
+// 只能换新切片，不能原地改。
 func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string]string) []model.Pricing {
 	if len(pricing) == 0 {
 		return pricing
@@ -18,12 +40,17 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 
 	filtered := make([]model.Pricing, 0, len(pricing))
 	for _, item := range pricing {
+		groups := make([]string, 0, len(item.EnableGroup))
 		for _, group := range item.EnableGroup {
 			if _, ok := usableGroup[group]; ok {
-				filtered = append(filtered, item)
-				break
+				groups = append(groups, group)
 			}
 		}
+		if len(groups) == 0 {
+			continue
+		}
+		item.EnableGroup = groups
+		filtered = append(filtered, item)
 	}
 	return filtered
 }
