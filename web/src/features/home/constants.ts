@@ -127,6 +127,46 @@ export const DEFAULT_FEATURES = [
   },
 ] as const
 
+// Pricing section - models listed on the home page, in display order.
+// Models that are no longer returned by /api/pricing simply drop out.
+export const HEADLINE_MODELS = [
+  'claude-opus-5-5',
+  'claude-sonnet-5-5',
+  'claude-fable-5-1',
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+] as const
+
+// Pricing section - the customer-facing lines, as group keys in display
+// order; the first one is the line the site leads with. Only these are ever
+// shown on the home page, whatever other groups /api/pricing returns.
+export const LINE_ORDER = ['超级稳定claude', 'claude MAX', 'Codex PRO'] as const
+
+export const MAIN_LINE: string = LINE_ORDER[0]
+
+// Pricing section - one-line description per group (i18n keys). A group
+// without an entry is shown without a description.
+export const LINE_NOTES: Record<string, string> = {
+  超级稳定claude:
+    'The main Claude line. Every Claude model on sale is available here.',
+  'claude MAX':
+    'Same pricing rule at a lower multiplier. Check the model catalog for which models are available on this line.',
+  'Codex PRO':
+    'GPT-6 Astra, Sol and Luna, for Codex CLI and OpenAI Chat clients.',
+}
+
+// Static pages served next to the app (not router routes): link with <a>.
+export const SITE_PAGES = {
+  priceTable: '/pricing-table',
+  claudeCode: '/claude-code',
+  codex: '/codex-api',
+  faq: '/faq',
+  docs: '/docs/',
+} as const
+
+export const SUPPORT_QQ_GROUP = '8522605'
+
 export function getGatewayFeatures(t: TFunction) {
   return GATEWAY_FEATURES.map((feature) => t(feature))
 }

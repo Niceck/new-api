@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
 
 import type { HomePageContentResponse } from './types'
 
@@ -31,4 +31,43 @@ import type { HomePageContentResponse } from './types'
 export async function getHomePageContent(): Promise<HomePageContentResponse> {
   const res = await api.get('/api/home_page_content')
   return res.data
+}
+
+const HOME_PRICING_TIMEOUT_MS = 8000
+
+type PricingGet = (
+  url: string,
+  config: ApiRequestConfig
+) => Promise<{ data: unknown }>
+
+/**
+ * Fetch the public pricing payload for the home page price table.
+ *
+ * Returned as unknown on purpose: the home page validates it field by field
+ * before showing any price.
+ *
+ * A failure here must stay inside the price section, which then points to
+ * the full price table. So the request opts out of the global toasts and of
+ * the session refresh, never joins an in-flight /api/pricing request made
+ * elsewhere without those options, and the error is rethrown as a plain
+ * Error: an AxiosError with status 500 would make the query cache send the
+ * whole page to /500.
+ */
+export async function fetchHomePricing(get: PricingGet): Promise<unknown> {
+  try {
+    const res = await get('/api/pricing', {
+      skipErrorHandler: true,
+      skipBusinessError: true,
+      skipAuthRefresh: true,
+      disableDuplicate: true,
+      timeout: HOME_PRICING_TIMEOUT_MS,
+    })
+    return res.data
+  } catch (error) {
+    throw new Error('Home page pricing is unavailable', { cause: error })
+  }
+}
+
+export function getHomePricing(): Promise<unknown> {
+  return fetchHomePricing((url, config) => api.get(url, config))
 }

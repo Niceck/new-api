@@ -24,7 +24,9 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { useStatus } from '@/hooks/use-status'
 
-import { HeroTerminalDemo } from '../hero-terminal-demo'
+import { SITE_PAGES } from '../../constants'
+import { ClientConfigCard } from '../client-config-card'
+import { HeroPriceHint } from '../hero-price-hint'
 
 interface HeroProps {
   className?: string
@@ -48,30 +50,18 @@ const MoreIcon = () => (
 export function Hero(props: HeroProps) {
   const { t } = useTranslation()
   const { status } = useStatus()
-  const docsUrl =
-    (status?.docs_link as string | undefined) || 'https://docs.newapi.pro'
+  const docsUrl = (status?.docs_link as string | undefined) || SITE_PAGES.docs
 
+  // The docs are a static site next to the app, never a router route.
   const renderDocsButton = () => {
-    const isExternal = docsUrl.startsWith('http')
-    if (isExternal) {
-      return (
-        <Button
-          variant='outline'
-          className='group border-border/50 hover:border-border hover:bg-muted/50 inline-flex h-11 items-center gap-1.5 rounded-lg px-5 text-sm font-medium'
-          render={
-            <a href={docsUrl} target='_blank' rel='noopener noreferrer' />
-          }
-        >
-          <BookOpen className='text-muted-foreground/80 group-hover:text-foreground size-4 transition-colors duration-200' />
-          <span>{t('Docs')}</span>
-        </Button>
-      )
-    }
+    const externalProps = docsUrl.startsWith('http')
+      ? { target: '_blank', rel: 'noopener noreferrer' }
+      : {}
     return (
       <Button
         variant='outline'
         className='group border-border/50 hover:border-border hover:bg-muted/50 inline-flex h-11 items-center gap-1.5 rounded-lg px-5 text-sm font-medium'
-        render={<Link to={docsUrl} />}
+        render={<a href={docsUrl} {...externalProps} />}
       >
         <BookOpen className='text-muted-foreground/80 group-hover:text-foreground size-4 transition-colors duration-200' />
         <span>{t('Docs')}</span>
@@ -80,7 +70,7 @@ export function Hero(props: HeroProps) {
   }
 
   return (
-    <section className='relative z-10 overflow-hidden px-6 pt-24 pb-16 md:pt-32 md:pb-24 lg:pt-36 lg:pb-28'>
+    <section className='relative z-10 overflow-hidden px-6 pt-24 pb-14 md:pt-32 md:pb-16 lg:pt-36 lg:pb-20'>
       {/* Radial gradient background */}
       <div
         aria-hidden
@@ -120,7 +110,7 @@ export function Hero(props: HeroProps) {
           >
             {t('Claude Code · Codex')}
             <br />
-            <span className='bg-gradient-to-r from-blue-400 via-violet-400 to-purple-500 bg-clip-text text-transparent'>
+            <span className='bg-gradient-to-r from-blue-600 via-violet-600 to-purple-600 bg-clip-text text-transparent dark:from-blue-400 dark:via-violet-400 dark:to-purple-400'>
               {t('Opus 5.5 · GPT-6')}
             </span>
           </h1>
@@ -129,9 +119,13 @@ export function Hero(props: HeroProps) {
             style={{ animationDelay: '120ms' }}
           >
             {t(
-              'Claude now offers Opus 5.5, Sonnet 5.5 and Fable 5.1; GPT-6 Astra, Sol and Luna are on the pro line. Multipliers: ordinary 0.40, stable Claude 1.75. GPT-6 uses two pricing tiers at 272K input tokens. See the model catalog for models by group and pricing.'
+              'Point the official Claude Code and Codex CLI at one new address. Billed in yuan for what you use.'
             )}
           </p>
+          <HeroPriceHint
+            className='landing-animate-fade-up mt-4 opacity-0'
+            style={{ animationDelay: '150ms' }}
+          />
 
           <div
             className='landing-animate-fade-up mt-8 flex flex-wrap items-center gap-3 opacity-0'
@@ -180,7 +174,7 @@ export function Hero(props: HeroProps) {
               </span>
               <p className='text-muted-foreground/60 text-xs leading-relaxed'>
                 {t(
-                  'Supports one-click configuration and perfectly adapts to NewAPI multi-protocol configuration.'
+                  'Claude models run on the official Claude Code client. GPT-6 works with Codex CLI and OpenAI Chat clients.'
                 )}
               </p>
             </div>
@@ -279,12 +273,12 @@ export function Hero(props: HeroProps) {
           </div>
         </div>
 
-        {/* Right Column: Hero Terminal API Demo */}
+        {/* Right Column: copy-ready client setup */}
         <div
           className='landing-animate-fade-up flex w-full justify-center opacity-0 lg:col-span-6'
           style={{ animationDelay: '320ms' }}
         >
-          <HeroTerminalDemo className='mt-8 lg:mt-0' />
+          <ClientConfigCard className='mt-8 lg:mt-0' />
         </div>
       </div>
     </section>

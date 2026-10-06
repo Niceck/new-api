@@ -16,50 +16,97 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Settings, Zap, BarChart3 } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { KeyRound, TerminalSquare, UserPlus } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { AnimateInView } from '@/components/animate-in-view'
 
+import { SITE_PAGES } from '../../constants'
+
+const STEP_LINK_CLASS =
+  'text-foreground/80 hover:text-foreground text-xs font-medium underline decoration-border underline-offset-4 transition-colors'
+
+interface Step {
+  num: string
+  title: string
+  desc: string
+  icon: ReactNode
+  links: ReactNode
+}
+
 export function HowItWorks() {
   const { t } = useTranslation()
 
-  const steps = [
+  const steps: Step[] = [
     {
       num: '1',
-      title: t('Configure'),
-      desc: t('Create a token and choose the group for your model.'),
-      icon: <Settings className='size-6' strokeWidth={1.5} />,
+      title: t('Sign up and sign in'),
+      desc: t(
+        'Register with your email. A new account starts with a zero balance.'
+      ),
+      icon: <UserPlus className='size-6' strokeWidth={1.5} />,
+      links: (
+        <Link to='/sign-up' className={STEP_LINK_CLASS}>
+          {t('Create account')}
+        </Link>
+      ),
     },
     {
       num: '2',
-      title: t('Connect'),
+      title: t('Top up and create a token'),
       desc: t(
-        'Connect Claude Code or Codex using the model names in the catalog.'
+        'Top up in the wallet, then create a token in the group that matches your client.'
       ),
-      icon: <Zap className='size-6' strokeWidth={1.5} />,
+      icon: <KeyRound className='size-6' strokeWidth={1.5} />,
+      links: (
+        <>
+          <Link to='/wallet' className={STEP_LINK_CLASS}>
+            {t('Wallet')}
+          </Link>
+          <Link to='/keys' className={STEP_LINK_CLASS}>
+            {t('Create a token')}
+          </Link>
+        </>
+      ),
     },
     {
       num: '3',
-      title: t('Monitor'),
-      desc: t('Check token usage, charges, and balance in the console.'),
-      icon: <BarChart3 className='size-6' strokeWidth={1.5} />,
+      title: t('Follow the guide for your client'),
+      desc: t(
+        'Copy the configuration, put your token in, and run the client as usual.'
+      ),
+      icon: <TerminalSquare className='size-6' strokeWidth={1.5} />,
+      links: (
+        <>
+          <a href={SITE_PAGES.claudeCode} className={STEP_LINK_CLASS}>
+            Claude Code
+          </a>
+          <a href={SITE_PAGES.codex} className={STEP_LINK_CLASS}>
+            Codex CLI
+          </a>
+          <a href={SITE_PAGES.docs} className={STEP_LINK_CLASS}>
+            {t('All setup docs')}
+          </a>
+        </>
+      ),
     },
   ]
 
   return (
-    <section className='border-border/40 relative z-10 border-t px-6 py-24 md:py-32'>
+    <section className='border-border/40 relative z-10 border-t px-6 py-16 md:py-24'>
       <div className='mx-auto max-w-6xl'>
-        <AnimateInView className='mb-16 text-center md:mb-20'>
+        <AnimateInView className='mb-12 text-center'>
           <p className='text-muted-foreground mb-3 text-xs font-medium tracking-widest uppercase'>
-            {t('How It Works')}
+            {t('Getting started')}
           </p>
           <h2 className='text-2xl font-bold tracking-tight md:text-3xl'>
             {t('Three steps to get started')}
           </h2>
         </AnimateInView>
 
-        <div className='grid gap-8 md:grid-cols-3 md:gap-12'>
+        <div className='grid gap-10 md:grid-cols-3 md:gap-12'>
           {steps.map((step, i) => (
             <AnimateInView
               key={step.num}
@@ -76,9 +123,12 @@ export function HowItWorks() {
                 </div>
               </div>
               <h3 className='mb-2 text-base font-semibold'>{step.title}</h3>
-              <p className='text-muted-foreground max-w-[240px] text-sm leading-relaxed'>
+              <p className='text-muted-foreground max-w-[260px] text-sm leading-relaxed'>
                 {step.desc}
               </p>
+              <div className='mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2'>
+                {step.links}
+              </div>
             </AnimateInView>
           ))}
         </div>
