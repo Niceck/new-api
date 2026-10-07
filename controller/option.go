@@ -335,6 +335,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "general_setting.chat_usage_details_fill_channels":
+		err = operation_setting.ValidateChatUsageDetailsFillChannels(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {

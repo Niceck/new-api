@@ -28,6 +28,13 @@ type GeneralSetting struct {
 	// 用来保证「每次上限 × 尝试次数」不越过前置网关的超时（如 Cloudflare 的 100 秒）。
 	// 请求路径不直接读这两个字段，读的是 RefreshStreamHeaderPolicy 发布的快照。
 	StreamHeaderTotalBudgetSeconds int `json:"stream_header_total_budget_seconds"`
+	// 按渠道点名：[渠道ID, ...]。这些渠道的上游在 chat/completions 的 usage 里会把值为 0 的
+	// 明细对象整个省掉（prompt_tokens_details / completion_tokens_details），而 OpenAI 官方
+	// 响应里它们始终存在。点名后，回给客户端的 usage 把缺的明细写明为 0。
+	// 只改回给客户端的正文，不影响计费。只点名确认过「省略即为 0」的上游：对根本不报
+	// 明细的上游，写 0 等于替它断言一个不知道的数。
+	// 请求路径读的是 RefreshChatUsageDetailsFill 发布的快照。
+	ChatUsageDetailsFillChannels []int `json:"chat_usage_details_fill_channels"`
 }
 
 // 默认配置
@@ -39,6 +46,7 @@ var generalSetting = GeneralSetting{
 	CustomCurrencySymbol:         "¤",
 	CustomCurrencyExchangeRate:   1.0,
 	StreamHeaderTimeoutByChannel: map[string]int{},
+	ChatUsageDetailsFillChannels: []int{},
 }
 
 func init() {

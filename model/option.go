@@ -630,6 +630,7 @@ func handleConfigUpdate(key, value string) bool {
 	} else if configName == "general_setting" {
 		// 请求路径读的是快照，不是结构体字段（见 RefreshStreamHeaderPolicy）
 		operation_setting.RefreshStreamHeaderPolicy()
+		operation_setting.RefreshChatUsageDetailsFill()
 	}
 
 	return true // 已处理

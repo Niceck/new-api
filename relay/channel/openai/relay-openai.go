@@ -26,7 +26,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	}
 
 	if !forceFormat && !thinkToContent {
-		return helper.StringData(c, data)
+		return helper.StringData(c, fillChatUsageDetailsInChunk(info, data))
 	}
 
 	var lastStreamResponse dto.ChatCompletionsStreamResponse
@@ -345,6 +345,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		}
 		responseBody = geminiRespStr
 	}
+
+	// 被点名的渠道：上游省略的零值用量明细，回给客户端时写明（只动 chat 的 OpenAI 格式响应）
+	responseBody = fillChatUsageDetailsInBody(info, responseBody)
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
