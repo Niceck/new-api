@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
 
+import { getPinnedGroupColor } from './group-badge/colors'
 import { StatusBadge, type StatusBadgeProps } from './status-badge'
 
 type GroupBadgeProps = Omit<
@@ -69,6 +70,7 @@ export function GroupBadge(props: GroupBadgeProps) {
   const isAutoGroup = groupName === 'auto'
   const isEmptyGroup = !groupName
   const isSpecialGroup = isAutoGroup || isEmptyGroup
+  const pinnedColor = groupName ? getPinnedGroupColor(groupName) : undefined
   const label = getGroupLabel({
     labelOverride,
     groupName,
@@ -83,8 +85,8 @@ export function GroupBadge(props: GroupBadgeProps) {
       copyable={copyable}
       label={label}
       showDot={showDot ?? (isSpecialGroup ? false : undefined)}
-      variant={isSpecialGroup ? 'neutral' : undefined}
-      autoColor={isSpecialGroup ? undefined : groupName}
+      variant={isSpecialGroup ? 'neutral' : pinnedColor}
+      autoColor={isSpecialGroup || pinnedColor ? undefined : groupName}
       className={cn('min-w-0 shrink overflow-hidden', className)}
     />
   )
