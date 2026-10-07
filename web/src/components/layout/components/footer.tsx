@@ -42,11 +42,10 @@ interface FooterProps {
   className?: string
 }
 
-const NEW_API_FOOTER_ATTRIBUTION_KEY = [
-  'footer',
-  'new' + 'api',
-  'projectAttributionSuffix',
-].join('.')
+// Legal notice required by NOTICE (additional terms under AGPLv3 section
+// 7(b)): this sentence must be kept as written, with a visible link to the
+// original project. It is a notice, not UI copy, so it is not translated.
+const PROJECT_URL = 'https://github.com/QuantumNous/new-api'
 
 function FooterLinkItem(props: { link: FooterLink }) {
   const { t } = useTranslation()
@@ -121,22 +120,25 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
   )
 }
 
+// The attribution says who built the frontend. It deliberately carries no
+// copyright line: the site's own copyright is shown separately, under the
+// site's name, so the two are not mistaken for one another.
+//
 // inline=true returns just the inner span for composition in a parent flex
 // row. inline=false wraps in a centered/right-aligned div (default).
-function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
-  const { t } = useTranslation()
+export function ProjectAttribution(props: { inline?: boolean }) {
   const content = (
     <span className='text-muted-foreground/45'>
-      &copy; {props.currentYear}{' '}
+      Frontend design and development by{' '}
       <a
-        href='https://github.com/QuantumNous/new-api'
+        href={PROJECT_URL}
         target='_blank'
         rel='noopener noreferrer'
         className='text-foreground/70 hover:text-foreground font-medium transition-colors'
       >
-        {t('New API')}
-      </a>
-      . {t(NEW_API_FOOTER_ATTRIBUTION_KEY)}
+        New API
+      </a>{' '}
+      contributors.
     </span>
   )
   if (props.inline) {
@@ -146,6 +148,45 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
     <div className='text-muted-foreground/45 text-center text-xs sm:text-right'>
       {content}
     </div>
+  )
+}
+
+interface CustomFooterProps {
+  /** Footer content configured in System Settings (trusted admin HTML) */
+  footerHtml: string
+  displayName: string
+  currentYear: number
+  className?: string
+}
+
+/**
+ * Footer shown when the site has its own footer content: that content on
+ * one side; the site's copyright, legal links and the project attribution
+ * on the other.
+ */
+export function CustomFooter(props: CustomFooterProps) {
+  return (
+    <footer
+      className={cn('border-border/40 relative z-10 border-t', props.className)}
+    >
+      <div className='mx-auto w-full max-w-6xl px-6 py-5'>
+        <div className='bg-muted/20 border-border/50 flex flex-col items-center justify-between gap-4 rounded-2xl border px-4 py-4 backdrop-blur-sm sm:flex-row sm:px-5'>
+          <div
+            className='custom-footer text-muted-foreground min-w-0 text-center text-sm sm:text-left'
+            dangerouslySetInnerHTML={{ __html: props.footerHtml }}
+          />
+          <div className='border-border/60 text-muted-foreground/45 flex w-full flex-col items-center gap-1 border-t pt-4 text-center text-xs sm:w-auto sm:items-end sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5 sm:text-right'>
+            <div className='flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:justify-end'>
+              <span className='text-muted-foreground/70'>
+                &copy; {props.currentYear} {props.displayName}
+              </span>
+              <LegalLinks leadingSeparator />
+            </div>
+            <ProjectAttribution inline />
+          </div>
+        </div>
+      </div>
+    </footer>
   )
 }
 
@@ -224,25 +265,12 @@ export function Footer(props: FooterProps) {
 
   if (footerHtml) {
     return (
-      <footer
-        className={cn(
-          'border-border/40 relative z-10 border-t',
-          props.className
-        )}
-      >
-        <div className='mx-auto w-full max-w-6xl px-6 py-5'>
-          <div className='bg-muted/20 border-border/50 flex flex-col items-center justify-between gap-4 rounded-2xl border px-4 py-4 backdrop-blur-sm sm:flex-row sm:px-5'>
-            <div
-              className='custom-footer text-muted-foreground min-w-0 text-center text-sm sm:text-left'
-              dangerouslySetInnerHTML={{ __html: footerHtml }}
-            />
-            <div className='border-border/60 text-muted-foreground/45 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t pt-4 text-xs sm:w-auto sm:justify-end sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5'>
-              <LegalLinks />
-              <ProjectAttribution currentYear={currentYear} inline />
-            </div>
-          </div>
-        </div>
-      </footer>
+      <CustomFooter
+        footerHtml={footerHtml}
+        displayName={displayName}
+        currentYear={currentYear}
+        className={props.className}
+      />
     )
   }
 
@@ -300,7 +328,7 @@ export function Footer(props: FooterProps) {
             </span>
             <LegalLinks leadingSeparator />
           </div>
-          <ProjectAttribution currentYear={currentYear} />
+          <ProjectAttribution />
         </div>
       </div>
     </footer>
