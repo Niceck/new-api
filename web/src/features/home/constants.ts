@@ -141,18 +141,26 @@ export const HEADLINE_MODELS = [
 // Pricing section - the customer-facing lines, as group keys in display
 // order; the first one is the line the site leads with. Only these are ever
 // shown on the home page, whatever other groups /api/pricing returns.
-export const LINE_ORDER = ['超级稳定claude', 'claude MAX', 'Codex PRO'] as const
+// The keys were renamed on 2026-10-07 to match the names customers see
+// (was 超级稳定claude / claude MAX / Codex PRO); a key that is not listed here
+// simply does not appear, so this list has to move together with the site's
+// group keys.
+export const LINE_ORDER = [
+  '满血稳定claude',
+  'claude kiro',
+  '满血稳定codex',
+] as const
 
 export const MAIN_LINE: string = LINE_ORDER[0]
 
 // Pricing section - one-line description per group (i18n keys). A group
 // without an entry is shown without a description.
 export const LINE_NOTES: Record<string, string> = {
-  超级稳定claude:
+  满血稳定claude:
     'The main Claude line. Every Claude model on sale is available here.',
-  'claude MAX':
+  'claude kiro':
     'Same pricing rule at a lower multiplier. Check the model catalog for which models are available on this line.',
-  'Codex PRO':
+  满血稳定codex:
     'GPT-6 Astra, Sol and Luna, for Codex CLI and OpenAI Chat clients.',
 }
 

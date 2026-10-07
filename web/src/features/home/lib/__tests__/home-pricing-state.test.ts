@@ -39,8 +39,8 @@ const DEFAULT_USD = { ...CNY, quotaDisplayType: 'USD' as const }
 
 const LINES: PriceLine[] = [
   {
-    group: '超级稳定claude',
-    label: '超级稳定claude',
+    group: '满血稳定claude',
+    label: '满血稳定claude',
     ratio: 1.75,
     rows: [],
   },

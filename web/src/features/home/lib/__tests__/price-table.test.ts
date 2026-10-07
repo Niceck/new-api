@@ -31,11 +31,11 @@ import {
 // 线上 /api/pricing 的真实形态（2026-10-06 抓取后裁剪）。
 const LIVE = {
   success: true,
-  group_ratio: { 'Codex PRO': 0.4, 'claude MAX': 0.4, 超级稳定claude: 1.75 },
+  group_ratio: { 满血稳定codex: 0.4, 'claude kiro': 0.4, 满血稳定claude: 1.75 },
   usable_group: {
-    'Codex PRO': '普通线路pro（0.6折）',
-    'claude MAX': '普通线路claude（0.6折）',
-    超级稳定claude: '超级稳定claude（2.5折）',
+    满血稳定codex: '普通线路pro（0.6折）',
+    'claude kiro': '普通线路claude（0.6折）',
+    满血稳定claude: '满血稳定claude（2.5折）',
   },
   data: [
     {
@@ -43,28 +43,28 @@ const LIVE = {
       quota_type: 0,
       model_ratio: 2,
       completion_ratio: 5,
-      enable_groups: ['claude MAX', '超级稳定claude'],
+      enable_groups: ['claude kiro', '满血稳定claude'],
     },
     {
       model_name: 'claude-fable-5',
       quota_type: 0,
       model_ratio: 5,
       completion_ratio: 5,
-      enable_groups: ['超级稳定claude'],
+      enable_groups: ['满血稳定claude'],
     },
     {
       model_name: 'claude-haiku-4-5-20251001',
       quota_type: 0,
       model_ratio: 0.5,
       completion_ratio: 5,
-      enable_groups: ['claude MAX', '超级稳定claude'],
+      enable_groups: ['claude kiro', '满血稳定claude'],
     },
     {
       model_name: 'gpt-6-sol',
       quota_type: 0,
       model_ratio: 1,
       completion_ratio: 5,
-      enable_groups: ['Codex PRO'],
+      enable_groups: ['满血稳定codex'],
       billing_mode: 'tiered_expr',
       billing_expr:
         'len <= 272000 ? tier("standard", p * 2 + c * 10 + cr * 0.2 + cc * 2.5) : tier("long_context", p * 4 + c * 15 + cr * 0.4 + cc * 5)',
@@ -74,20 +74,20 @@ const LIVE = {
 
 const OPTIONS = {
   headlineModels: ['claude-opus-5-5', 'gpt-6-sol', 'gpt-6-astra'],
-  lineOrder: ['超级稳定claude', 'claude MAX', 'Codex PRO'],
+  lineOrder: ['满血稳定claude', 'claude kiro', '满血稳定codex'],
 }
 
 describe('stripGroupLabelNote', () => {
   test('去掉分组显示名末尾的括注（全角与半角）', () => {
     assert.equal(
-      stripGroupLabelNote('超级稳定claude（2.5折）'),
-      '超级稳定claude'
+      stripGroupLabelNote('满血稳定claude（2.5折）'),
+      '满血稳定claude'
     )
     assert.equal(stripGroupLabelNote('普通线路pro (0.6折)'), '普通线路pro')
   })
 
   test('没有括注或整段都是括注时原样返回', () => {
-    assert.equal(stripGroupLabelNote('Codex PRO'), 'Codex PRO')
+    assert.equal(stripGroupLabelNote('满血稳定codex'), '满血稳定codex')
     assert.equal(stripGroupLabelNote('（内测）'), '（内测）')
   })
 })
@@ -332,9 +332,9 @@ describe('buildPriceLines', () => {
     const lines = buildPriceLines(LIVE, OPTIONS)
     assert.deepEqual(
       lines.map((line) => line.group),
-      ['超级稳定claude', 'claude MAX', 'Codex PRO']
+      ['满血稳定claude', 'claude kiro', '满血稳定codex']
     )
-    assert.equal(lines[0].label, '超级稳定claude')
+    assert.equal(lines[0].label, '满血稳定claude')
     assert.equal(lines[0].ratio, 1.75)
     assert.deepEqual(lines[0].rows, [
       {
@@ -374,7 +374,7 @@ describe('buildPriceLines', () => {
   test('行顺序跟随标题模型清单，而不是接口返回顺序', () => {
     const lines = buildPriceLines(LIVE, {
       headlineModels: ['claude-haiku-4-5-20251001', 'claude-opus-5-5'],
-      lineOrder: ['claude MAX'],
+      lineOrder: ['claude kiro'],
     })
     assert.deepEqual(
       lines[0].rows.map((row) => row.model),
@@ -395,18 +395,18 @@ describe('buildPriceLines', () => {
     const lines = buildPriceLines(withInternal, OPTIONS)
     assert.deepEqual(
       lines.map((line) => line.group),
-      ['超级稳定claude', 'claude MAX', 'Codex PRO']
+      ['满血稳定claude', 'claude kiro', '满血稳定codex']
     )
   })
 
   test('清单里的分组没有标题模型时不出现', () => {
     const lines = buildPriceLines(LIVE, {
       headlineModels: ['claude-opus-5-5'],
-      lineOrder: ['Codex PRO', 'claude MAX'],
+      lineOrder: ['满血稳定codex', 'claude kiro'],
     })
     assert.deepEqual(
       lines.map((line) => line.group),
-      ['claude MAX']
+      ['claude kiro']
     )
   })
 
@@ -414,23 +414,23 @@ describe('buildPriceLines', () => {
     const lines = buildPriceLines(
       {
         ...LIVE,
-        usable_group: { 'claude MAX': { desc: '普通线路（内测）', ratio: 1 } },
+        usable_group: { 'claude kiro': { desc: '普通线路（内测）', ratio: 1 } },
       },
       OPTIONS
     )
     const byGroup = new Map(lines.map((line) => [line.group, line.label]))
-    assert.equal(byGroup.get('claude MAX'), '普通线路')
-    assert.equal(byGroup.get('Codex PRO'), 'Codex PRO')
+    assert.equal(byGroup.get('claude kiro'), '普通线路')
+    assert.equal(byGroup.get('满血稳定codex'), '满血稳定codex')
   })
 
   test('倍率缺失或非法的分组整条不出，不拿 1 顶替', () => {
     const lines = buildPriceLines(
-      { ...LIVE, group_ratio: { 'claude MAX': 0.4, 超级稳定claude: 'bad' } },
+      { ...LIVE, group_ratio: { 'claude kiro': 0.4, 满血稳定claude: 'bad' } },
       OPTIONS
     )
     assert.deepEqual(
       lines.map((line) => line.group),
-      ['claude MAX']
+      ['claude kiro']
     )
   })
 
@@ -443,7 +443,7 @@ describe('buildPriceLines', () => {
 
   test('本站价算出来不是有限数时，该模型在这条线路上不给价格', () => {
     const lines = buildPriceLines(
-      { ...LIVE, group_ratio: { ...LIVE.group_ratio, 超级稳定claude: 1e308 } },
+      { ...LIVE, group_ratio: { ...LIVE.group_ratio, 满血稳定claude: 1e308 } },
       OPTIONS
     )
     assert.deepEqual(lines[0].rows, [{ model: 'claude-opus-5-5', quote: null }])
