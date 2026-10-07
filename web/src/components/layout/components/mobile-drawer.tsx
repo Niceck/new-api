@@ -21,6 +21,7 @@ import { X, User, Wallet, LogOut } from 'lucide-react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 
+import { AccountIdentity } from '@/components/account-identity'
 import { SignOutDialog } from '@/components/sign-out-dialog'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -80,7 +81,7 @@ interface MobileUserProfileProps {
 function MobileUserProfile({ user, onNavigate }: MobileUserProfileProps) {
   const { t } = useTranslation()
   const [signOutOpen, setSignOutOpen] = useDialogState()
-  const { displayName, initials, roleLabel } = useUserDisplay(user)
+  const { displayName, initials } = useUserDisplay(user)
 
   if (!user) return null
 
@@ -94,22 +95,7 @@ function MobileUserProfile({ user, onNavigate }: MobileUserProfileProps) {
             <AvatarImage src='/avatars/01.png' alt={`@${displayName}`} />
             <AvatarFallback className='text-xs'>{initials}</AvatarFallback>
           </Avatar>
-          <div className='flex flex-1 flex-col gap-0.5 overflow-hidden'>
-            <p className='text-foreground truncate font-medium'>
-              {displayName}
-            </p>
-            <div className='flex items-center gap-1.5'>
-              <span className='text-muted-foreground text-xs'>{roleLabel}</span>
-              {user.group && (
-                <>
-                  <span className='text-muted-foreground text-xs'>·</span>
-                  <span className='text-muted-foreground text-xs'>
-                    {String(user.group)}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
+          <AccountIdentity user={user} />
         </div>
 
         {/* Navigation links - same style as top nav */}

@@ -21,6 +21,7 @@ import { User, Wallet, LogOut, Settings } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { AccountIdentity } from '@/components/account-identity'
 import { SignOutDialog } from '@/components/sign-out-dialog'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -45,7 +46,7 @@ export function ProfileDropdown() {
   const navigate = useNavigate()
   const [open, setOpen] = useDialogState()
   const user = useAuthStore((state) => state.auth.user)
-  const { displayName, roleLabel } = useUserDisplay(user)
+  const { displayName } = useUserDisplay(user)
   const isSuperAdmin = user?.role === ROLE.SUPER_ADMIN
   const isWalletVisible = useIsSidebarModuleVisible('/wallet')
   const avatarName = user?.username || displayName
@@ -80,24 +81,7 @@ export function ProfileDropdown() {
                 {avatarFallback}
               </AvatarFallback>
             </Avatar>
-            <div className='flex flex-1 flex-col gap-0.5 overflow-hidden'>
-              <p className='text-foreground truncate text-sm font-medium'>
-                {displayName}
-              </p>
-              <div className='flex items-center gap-1.5'>
-                <span className='text-muted-foreground text-xs'>
-                  {roleLabel}
-                </span>
-                {user?.group && (
-                  <>
-                    <span className='text-muted-foreground text-xs'>·</span>
-                    <span className='text-muted-foreground truncate text-xs'>
-                      {String(user.group)}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
+            <AccountIdentity user={user} />
           </div>
 
           <DropdownMenuSeparator />

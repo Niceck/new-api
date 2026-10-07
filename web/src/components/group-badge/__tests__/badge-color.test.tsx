@@ -17,42 +17,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
+import { after, before, describe, test } from 'node:test'
 
 import { Window } from 'happy-dom'
 import { createInstance } from 'i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 
+import { GroupBadge } from '@/components/group-badge'
+
+// No top-level await: while it is pending Bun starts the next test file, and
+// registering these cases afterwards fails as "test() inside another test()".
 const dom = new Window()
-const globals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'getComputedStyle',
-] as const
-for (const key of globals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: dom[key],
-  })
-}
-
-const { GroupBadge } = await import('@/components/group-badge')
-
 const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: { translation: { Auto: 'Auto', 'User Group': 'User Group' } },
-  },
+
+before(async () => {
+  await i18n.use(initReactI18next).init({
+    lng: 'en',
+    resources: {
+      en: { translation: { Auto: 'Auto', 'User Group': 'User Group' } },
+    },
+  })
 })
 
 const TEXT_COLOR_CLASSES = [

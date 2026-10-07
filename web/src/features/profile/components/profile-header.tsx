@@ -57,7 +57,6 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
               <div className='flex flex-col items-center gap-1 sm:flex-row sm:justify-start sm:gap-4'>
                 <Skeleton className='h-4 w-24' />
                 <Skeleton className='h-4 w-40' />
-                <Skeleton className='h-4 w-20' />
               </div>
             </div>
           </div>
@@ -150,12 +149,6 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
                 <>
                   <span>•</span>
                   <span className='truncate'>{profile.email}</span>
-                </>
-              )}
-              {profile.group && (
-                <>
-                  <span>•</span>
-                  <span className='truncate'>{profile.group}</span>
                 </>
               )}
             </div>
