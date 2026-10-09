@@ -351,7 +351,13 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 		topUp := &TopUp{}
 		// 行级锁：并发回调与管理员补单串行化，避免双重入账。
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
-			return ErrTopUpNotFound
+			// 只有「查无此行」才是订单不存在。断连、行锁等待超时这类查询故障要原样
+			// 返回：调用方对「订单不存在」回 success、平台不再重投，把故障报成它，
+			// 这笔已付款的订单就再也入不了账。
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTopUpNotFound
+			}
+			return err
 		}
 		// provider 隔离：TRON 等独立网关有自己的结算路径，不得在此处理。
 		if topUp.PaymentProvider != PaymentProviderEpay {

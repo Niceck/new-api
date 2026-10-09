@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // epayFixture 建一个 pending 的易支付订单与对应用户。
@@ -170,4 +172,38 @@ func TestRechargeEpay_PersistsActualPaymentMethod(t *testing.T) {
 	require.NoError(t, DB.Where("trade_no = ?", topUp.TradeNo).First(stored).Error)
 	assert.Equal(t, "wxpay", stored.PaymentMethod)
 	assert.NotZero(t, stored.CompleteTime, "成功单必须有完成时间")
+}
+
+// 查单本身失败（断连、行锁等待超时）不是「订单不存在」。控制器对「订单不存在」
+// 回 success、平台不再重投；把数据库故障报成它，这笔已付款的订单就再也入不了账。
+func TestRechargeEpay_LookupFailureIsNotReportedAsMissingOrder(t *testing.T) {
+	topUp := epayFixture(t, "epay-lookup-fail", 91010, 10, 300)
+	const hook = "test:fail_topup_lookup"
+	lookupErr := errors.New("simulated lock wait timeout")
+	require.NoError(t, DB.Callback().Query().Before("gorm:query").Register(hook, func(tx *gorm.DB) {
+		if tx.Statement.Table == "top_ups" {
+			_ = tx.AddError(lookupErr)
+		}
+	}))
+	hooked := true
+	unhook := func() {
+		if hooked {
+			hooked = false
+			require.NoError(t, DB.Callback().Query().Remove(hook))
+		}
+	}
+	t.Cleanup(unhook)
+
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	require.ErrorIs(t, err, lookupErr)
+	assert.NotErrorIs(t, err, ErrTopUpNotFound)
+
+	unhook()
+	assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, topUp.TradeNo))
+	assert.Equal(t, 300, userQuota(t, 91010))
+
+	// 平台重投时故障已消失：照常入账
+	quotaAdded, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.Equal(t, int(decimalQuotaForAmount(10)), quotaAdded)
 }
