@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
@@ -97,13 +98,30 @@ func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
 func GetRequestAutoGroups(c *gin.Context, userGroup string) []string {
 	value, ok := common.GetContextKey(c, constant.ContextKeyTokenAutoGroups)
 	if !ok {
-		return GetUserAutoGroup(userGroup)
+		return filterGroupsByEntry(c, GetUserAutoGroup(userGroup))
 	}
 	groups, ok := value.([]string)
 	if !ok {
 		return []string{}
 	}
-	return FilterUserTokenAutoGroups(userGroup, groups)
+	// 入口筛选排在个数上限之前：被筛掉的分组不占名额。
+	return FilterUserTokenAutoGroups(userGroup, filterGroupsByEntry(c, groups))
+}
+
+// filterGroupsByEntry 去掉不允许走当前入口的分组（general_setting.group_entry_hosts），
+// 免得 auto 令牌把请求带进只该走专用入口的分组。认不出入口时按主站以外的未知入口处理。
+func filterGroupsByEntry(c *gin.Context, groups []string) []string {
+	host := ""
+	if c != nil && c.Request != nil {
+		host = c.Request.Host
+	}
+	filtered := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if operation_setting.GroupAllowedOnHost(group, host) {
+			filtered = append(filtered, group)
+		}
+	}
+	return filtered
 }
 
 // GetGroupsEnabledModels 按 groups 顺序获取各分组启用的模型并去重

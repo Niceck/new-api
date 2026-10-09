@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -472,6 +473,11 @@ func TokenAuth() func(c *gin.Context) {
 			}
 			userGroup = tokenGroup
 		}
+		// 入口限制看的是最终生效的分组：没选分组的令牌按用户分组兜底，同样受限。
+		// auto 令牌在这里放行，具体分组在挑选时再筛（service.GetRequestAutoGroups）。
+		if rejectGroupOnWrongEntry(c, userGroup) {
+			return
+		}
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 
 		err = SetupContextForToken(c, token, parts...)
@@ -480,6 +486,17 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+// rejectGroupOnWrongEntry 在分组不允许走当前入口（请求的 Host）时中止请求并返回 true。
+// 判断只看分组与 Host，对所有客户端一视同仁（见 general_setting.group_entry_hosts）。
+func rejectGroupOnWrongEntry(c *gin.Context, group string) bool {
+	if operation_setting.GroupAllowedOnHost(group, c.Request.Host) {
+		return false
+	}
+	abortWithOpenAiMessage(c, http.StatusForbidden,
+		operation_setting.GroupEntryRejectMessage(group), types.ErrorCodeAccessDenied)
+	return true
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {

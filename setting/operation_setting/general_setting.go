@@ -35,6 +35,15 @@ type GeneralSetting struct {
 	// 明细的上游，写 0 等于替它断言一个不知道的数。
 	// 请求路径读的是 RefreshChatUsageDetailsFill 发布的快照。
 	ChatUsageDetailsFillChannels []int `json:"chat_usage_details_fill_channels"`
+	// 分组只能走指定的入口：{"分组": ["主机名", ...]}。登记了的分组，只有请求的 Host
+	// （不看端口）在列表里才放行，别的入口一律回 403；没登记的分组不受限。
+	// 用来把一条线路固定在它自己的接口地址上——第三方按接口地址的域名归并数据时，
+	// 这条线路的记录不会混进主站域名名下。对所有客户端一视同仁，不看来源和请求形态。
+	// 请求路径读的是 RefreshGroupEntryHosts 发布的快照。
+	GroupEntryHosts map[string][]string `json:"group_entry_hosts"`
+	// 分组走错入口时回给客户端的提示；空串用内置提示。可用占位符 {group}（分组名）
+	// 与 {entry}（该分组登记的第一个主机名）。
+	GroupEntryRejectMessage string `json:"group_entry_reject_message"`
 }
 
 // 默认配置
@@ -47,6 +56,7 @@ var generalSetting = GeneralSetting{
 	CustomCurrencyExchangeRate:   1.0,
 	StreamHeaderTimeoutByChannel: map[string]int{},
 	ChatUsageDetailsFillChannels: []int{},
+	GroupEntryHosts:              map[string][]string{},
 }
 
 func init() {

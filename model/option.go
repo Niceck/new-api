@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -208,6 +210,38 @@ func validateOptionValue(key string, value string) error {
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
+	}
+	if key == groupEntryHostsOptionKey {
+		return validateGroupEntryHostsOption(value)
+	}
+	if key == groupEntryRejectMessageOptionKey {
+		return operation_setting.ValidateGroupEntryRejectMessage(value)
+	}
+	return nil
+}
+
+const (
+	groupEntryHostsOptionKey         = "general_setting.group_entry_hosts"
+	groupEntryRejectMessageOptionKey = "general_setting.group_entry_reject_message"
+)
+
+// validateGroupEntryHostsOption 校验 general_setting.group_entry_hosts 的待写入值。
+// 除了格式，还要求登记的分组确实存在：分组名写错的条目不会限制任何请求，
+// 接口却报成功，等于以为隔离了而实际没有。
+func validateGroupEntryHostsOption(value string) error {
+	entries, err := operation_setting.ParseGroupEntryHosts(value)
+	if err != nil {
+		return err
+	}
+	groups := make([]string, 0, len(entries))
+	for group := range entries {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+	for _, group := range groups {
+		if !ratio_setting.ContainsGroupRatio(group) {
+			return fmt.Errorf("分组 %s 不存在（分组倍率里没有它）", group)
+		}
 	}
 	return nil
 }
@@ -615,6 +649,13 @@ func handleConfigUpdate(key, value string) bool {
 		return false // 未注册的配置
 	}
 
+	if key == groupEntryHostsOptionKey {
+		if _, err := operation_setting.ParseGroupEntryHosts(value); err != nil {
+			// 管理接口写入前已校验过；走到这里说明值是绕过校验进库的（直接改库）
+			common.SysError("库里的 " + key + " 不合规，入口限制可能没有按预期生效：" + err.Error())
+		}
+	}
+
 	// 更新配置
 	configMap := map[string]string{
 		configKey: value,
@@ -631,6 +672,7 @@ func handleConfigUpdate(key, value string) bool {
 		// 请求路径读的是快照，不是结构体字段（见 RefreshStreamHeaderPolicy）
 		operation_setting.RefreshStreamHeaderPolicy()
 		operation_setting.RefreshChatUsageDetailsFill()
+		operation_setting.RefreshGroupEntryHosts()
 	}
 
 	return true // 已处理
