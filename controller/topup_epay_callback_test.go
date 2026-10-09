@@ -79,10 +79,18 @@ func seedPendingEpayOrder(t *testing.T, db *gorm.DB, tradeNo string, userID int,
 }
 
 // postEpayNotify 用商户密钥签一条平台形态的成功回调并投给 EpayNotify，返回应答正文。
+// 金额与 seedPendingEpayOrder 建的订单一致。
 func postEpayNotify(t *testing.T, tradeNo string) string {
 	t.Helper()
+	return postEpayNotifyPaying(t, tradeNo, "10.00")
+}
+
+// postEpayNotifyPaying 同上，但回调里的金额由调用方给：签名照样有效，只是金额可以
+// 与订单不同——这正是金额比对要拦的那种通知。
+func postEpayNotifyPaying(t *testing.T, tradeNo string, money string) string {
+	t.Helper()
 	signed, err := epay.GenerateParamsWithError(map[string]string{
-		"pid": "epay_id", "type": "alipay", "money": "10.00", "name": "TUC10",
+		"pid": "epay_id", "type": "alipay", "money": money, "name": "TUC10",
 		"out_trade_no": tradeNo, "trade_no": "2026100922001400000000000001",
 		"trade_status": epay.StatusTradeSuccess,
 	}, epayCallbackTestKey)
@@ -158,4 +166,33 @@ func TestEpayNotifyStopsRedeliveryForUnknownOrder(t *testing.T) {
 	status, quota := epayOrderState(t, db, "USR9NOother", 9)
 	assert.Equal(t, common.TopUpStatusPending, status)
 	assert.Equal(t, 100, quota)
+}
+
+// 验签通过但金额与订单不符：不入账、不确认。回 fail 而不是 success——我们没有受理
+// 这笔钱，不能告诉平台「已处理」；订单留在 pending，随后金额相符的通知照常入账。
+func TestEpayNotifyRefusesToCreditWhenAmountDiffersFromOrder(t *testing.T) {
+	db := setupEpayCallbackTest(t)
+	seedPendingEpayOrder(t, db, "USR10NOamount", 10, 100)
+
+	assert.Equal(t, "fail", postEpayNotifyPaying(t, "USR10NOamount", "0.01"))
+	status, quota := epayOrderState(t, db, "USR10NOamount", 10)
+	assert.Equal(t, common.TopUpStatusPending, status)
+	assert.Equal(t, 100, quota, "签名有效也不能按订单额度入账")
+
+	require.Equal(t, "success", postEpayNotifyPaying(t, "USR10NOamount", "10.00"))
+	status, quota = epayOrderState(t, db, "USR10NOamount", 10)
+	assert.Equal(t, common.TopUpStatusSuccess, status)
+	assert.Greater(t, quota, 100)
+}
+
+// 已结清订单的重投即使金额对不上也回 success：订单早已入账，没有可重投出来的结果。
+func TestEpayNotifyAcknowledgesReplayOfSettledOrderWhateverTheAmount(t *testing.T) {
+	db := setupEpayCallbackTest(t)
+	seedPendingEpayOrder(t, db, "USR11NOreplay", 11, 100)
+	require.Equal(t, "success", postEpayNotify(t, "USR11NOreplay"))
+	_, credited := epayOrderState(t, db, "USR11NOreplay", 11)
+
+	assert.Equal(t, "success", postEpayNotifyPaying(t, "USR11NOreplay", "0.01"))
+	_, afterReplay := epayOrderState(t, db, "USR11NOreplay", 11)
+	assert.Equal(t, credited, afterReplay)
 }

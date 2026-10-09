@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestRechargeEpay_CreditsOrderAndQuotaTogether(t *testing.T) {
 	topUp := epayFixture(t, "epay-ok", 91001, 10, 500)
 	expected := int(decimalQuotaForAmount(10))
 
-	quotaAdded, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	quotaAdded, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.NoError(t, err)
 
 	assert.Equal(t, expected, quotaAdded)
@@ -70,11 +71,11 @@ func TestRechargeEpay_IsIdempotentOnReplay(t *testing.T) {
 	topUp := epayFixture(t, "epay-replay", 91002, 10, 0)
 	expected := int(decimalQuotaForAmount(10))
 
-	first, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	first, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.NoError(t, err)
 	assert.Equal(t, expected, first)
 
-	second, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	second, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.NoError(t, err, "重投必须幂等成功，否则 webhook 会被平台反复重试")
 	assert.Equal(t, 0, second, "重投不得再次入账")
 
@@ -94,7 +95,7 @@ func TestRechargeEpay_ConcurrentCallbacksCreditOnce(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			credited[idx], errs[idx] = RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+			credited[idx], errs[idx] = RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 		}(i)
 	}
 	wg.Wait()
@@ -114,7 +115,7 @@ func TestRechargeEpay_RejectsForeignProvider(t *testing.T) {
 	require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", topUp.TradeNo).
 		Update("payment_provider", PaymentProviderTron).Error)
 
-	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
 	assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, topUp.TradeNo))
@@ -123,7 +124,7 @@ func TestRechargeEpay_RejectsForeignProvider(t *testing.T) {
 
 // 订单不存在。
 func TestRechargeEpay_RejectsUnknownTradeNo(t *testing.T) {
-	_, err := RechargeEpay("epay-missing", "alipay", "127.0.0.1")
+	_, err := RechargeEpay("epay-missing", "alipay", "10.00", "127.0.0.1")
 	require.ErrorIs(t, err, ErrTopUpNotFound)
 }
 
@@ -133,7 +134,7 @@ func TestRechargeEpay_RejectsNonPendingOrder(t *testing.T) {
 	require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", topUp.TradeNo).
 		Update("status", common.TopUpStatusExpired).Error)
 
-	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.ErrorIs(t, err, ErrTopUpStatusInvalid)
 
 	assert.Equal(t, 0, userQuota(t, 91005))
@@ -143,7 +144,7 @@ func TestRechargeEpay_RejectsNonPendingOrder(t *testing.T) {
 func TestRechargeEpay_RejectsNonPositiveQuota(t *testing.T) {
 	topUp := epayFixture(t, "epay-zero", 91006, 0, 0)
 
-	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "0.00", "127.0.0.1")
 	require.Error(t, err)
 
 	assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, topUp.TradeNo))
@@ -154,7 +155,7 @@ func TestRechargeEpay_RejectsNonPositiveQuota(t *testing.T) {
 func TestRechargeEpay_EnforcesQuotaUpperBound(t *testing.T) {
 	topUp := epayFixture(t, "epay-overflow", 91007, 10, common.MaxQuota-1)
 
-	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.Error(t, err)
 
 	assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, topUp.TradeNo))
@@ -165,7 +166,7 @@ func TestRechargeEpay_EnforcesQuotaUpperBound(t *testing.T) {
 func TestRechargeEpay_PersistsActualPaymentMethod(t *testing.T) {
 	topUp := epayFixture(t, "epay-method", 91008, 10, 0)
 
-	_, err := RechargeEpay(topUp.TradeNo, "wxpay", "127.0.0.1")
+	_, err := RechargeEpay(topUp.TradeNo, "wxpay", "10.00", "127.0.0.1")
 	require.NoError(t, err)
 
 	stored := &TopUp{}
@@ -194,7 +195,7 @@ func TestRechargeEpay_LookupFailureIsNotReportedAsMissingOrder(t *testing.T) {
 	}
 	t.Cleanup(unhook)
 
-	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.ErrorIs(t, err, lookupErr)
 	assert.NotErrorIs(t, err, ErrTopUpNotFound)
 
@@ -203,7 +204,121 @@ func TestRechargeEpay_LookupFailureIsNotReportedAsMissingOrder(t *testing.T) {
 	assert.Equal(t, 300, userQuota(t, 91010))
 
 	// 平台重投时故障已消失：照常入账
-	quotaAdded, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	quotaAdded, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 	require.NoError(t, err)
 	assert.Equal(t, int(decimalQuotaForAmount(10)), quotaAdded)
+}
+
+// 回调金额必须等于订单金额。验签只证明这条通知出自持有商户密钥的一方，不证明
+// 「付的是这张订单的钱」：额度按本地订单的 Amount 入账，一条金额更小却指向大额
+// 订单的通知若被放行，就是花小钱拿大额度。ZPAY 文档也要求商户自行校验金额。
+func TestRechargeEpay_RejectsCallbackAmountThatDiffersFromOrder(t *testing.T) {
+	cases := []struct{ name, paid string }{
+		{"少付", "0.01"},
+		{"少一分", "9.99"},
+		{"多付", "10.01"},
+		{"负数", "-10.00"},
+		{"空", ""},
+		{"非数字", "abc"},
+		{"非有限数", "NaN"},
+		{"带货币符号", "¥10.00"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			userId := 91100 + i
+			topUp := epayFixture(t, fmt.Sprintf("epay-amount-%d", i), userId, 10, 700)
+
+			credited, err := RechargeEpay(topUp.TradeNo, "alipay", tc.paid, "127.0.0.1")
+			require.ErrorIs(t, err, ErrTopUpAmountMismatch)
+			assert.Equal(t, 0, credited)
+
+			assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, topUp.TradeNo), "订单要留在 pending，等对账与人工核实")
+			assert.Equal(t, 700, userQuota(t, userId), "金额不符不得入账")
+		})
+	}
+}
+
+// 数值相等即可，不挑写法：平台回 "10"、"10.0"、"10.00" 都是同一笔钱。
+// 实测 ZPAY 一律回两位小数，这里放宽只是不让无害的格式差异把正常付款挡在门外。
+func TestRechargeEpay_AcceptsEquivalentSpellingsOfTheOrderAmount(t *testing.T) {
+	for i, paid := range []string{"10", "10.0", "10.00", "10.000", " 10.00 "} {
+		t.Run(paid, func(t *testing.T) {
+			userId := 91200 + i
+			topUp := epayFixture(t, fmt.Sprintf("epay-spelling-%d", i), userId, 10, 0)
+
+			credited, err := RechargeEpay(topUp.TradeNo, "alipay", paid, "127.0.0.1")
+			require.NoError(t, err)
+			assert.Equal(t, int(decimalQuotaForAmount(10)), credited)
+		})
+	}
+}
+
+// 应付金额不是整数时（分组倍率、折扣算出来的），比对口径必须与下单时发给平台的
+// 金额文本一致：下单发的是保留两位小数后的值，回调回来的也是它。
+func TestRechargeEpay_ComparesAgainstTheAmountSentToThePlatform(t *testing.T) {
+	cases := []struct {
+		money     float64
+		paid      string
+		wantMatch bool
+	}{
+		{7.3, "7.30", true},
+		{0.1 + 0.2, "0.30", true}, // 0.30000000000000004
+		{19.999, "20.00", true},   // 下单时四舍五入到 20.00
+		{1.005, "1.00", true},     // 二进制里略小于 1.005，下单发出的是 1.00
+		{1.005, "1.01", false},
+		{7.3, "7.29", false},
+		{7.3, "7.31", false},
+	}
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("%v/%s", tc.money, tc.paid), func(t *testing.T) {
+			userId := 91300 + i
+			topUp := epayFixture(t, fmt.Sprintf("epay-frac-%d", i), userId, 10, 0)
+			require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", topUp.TradeNo).
+				Update("money", tc.money).Error)
+			require.Equal(t, tc.paid == EpayOrderMoney(tc.money), tc.wantMatch, "用例与下单口径自洽")
+
+			_, err := RechargeEpay(topUp.TradeNo, "alipay", tc.paid, "127.0.0.1")
+			if tc.wantMatch {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrTopUpAmountMismatch)
+			assert.Equal(t, 0, userQuota(t, userId))
+		})
+	}
+}
+
+// 已入账订单的重投：不再入账，也不因为这次通知的金额不同而报错——幂等优先，
+// 否则平台对一张已经结清的订单反复重投。
+func TestRechargeEpay_ReplayOfSettledOrderIgnoresAmount(t *testing.T) {
+	topUp := epayFixture(t, "epay-replay-amount", 91400, 10, 0)
+	first, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
+	require.NoError(t, err)
+
+	again, err := RechargeEpay(topUp.TradeNo, "alipay", "0.01", "127.0.0.1")
+	require.NoError(t, err)
+	assert.Equal(t, 0, again)
+	assert.Equal(t, first, userQuota(t, 91400))
+}
+
+// 金额不符的通知不能把订单「用掉」：随后真正金额相符的通知照常入账。
+func TestRechargeEpay_MismatchLeavesOrderPayable(t *testing.T) {
+	topUp := epayFixture(t, "epay-amount-then-ok", 91401, 10, 0)
+
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "0.01", "127.0.0.1")
+	require.ErrorIs(t, err, ErrTopUpAmountMismatch)
+
+	credited, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
+	require.NoError(t, err)
+	assert.Equal(t, int(decimalQuotaForAmount(10)), credited)
+}
+
+// 金额不符的错误要带上两边的金额，日志里才看得出差在哪。
+func TestRechargeEpay_MismatchErrorNamesBothAmounts(t *testing.T) {
+	topUp := epayFixture(t, "epay-amount-msg", 91402, 10, 0)
+
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "0.01", "127.0.0.1")
+	require.ErrorIs(t, err, ErrTopUpAmountMismatch)
+	assert.Contains(t, err.Error(), "10.00")
+	assert.Contains(t, err.Error(), "0.01")
 }

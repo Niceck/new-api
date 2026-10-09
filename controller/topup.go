@@ -252,7 +252,7 @@ func RequestEpay(c *gin.Context) {
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,
 		Name:           fmt.Sprintf("TUC%d", req.Amount),
-		Money:          strconv.FormatFloat(payMoney, 'f', 2, 64),
+		Money:          model.EpayOrderMoney(payMoney),
 		Device:         epay.PC,
 		NotifyUrl:      notifyUrl,
 		ReturnUrl:      returnUrl,
@@ -400,7 +400,7 @@ func EpayNotify(c *gin.Context) {
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 
-	quotaToAdd, err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP())
+	quotaToAdd, err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.Money, c.ClientIP())
 	if err != nil {
 		switch {
 		case errors.Is(err, model.ErrTopUpNotFound):
@@ -413,6 +413,12 @@ func EpayNotify(c *gin.Context) {
 		case errors.Is(err, model.ErrTopUpStatusInvalid):
 			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单状态不可入账 trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
 			writeEpayReply(c, "success", verifyInfo.ServiceTradeNo)
+		case errors.Is(err, model.ErrTopUpAmountMismatch):
+			// 验签通过但金额与订单不符：不入账，也不回 success——我们没有受理这笔钱。
+			// 订单留在 pending；真有人付了款，对账巡检会按「平台已收款、本地未入账」
+			// 报出来并标注金额不符。
+			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 回调金额与订单不符，未入账 trade_no=%s callback_type=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP(), err.Error()))
+			writeEpayReply(c, "fail", verifyInfo.ServiceTradeNo)
 		default:
 			// 落账失败（DB 故障等）：回 fail 让平台重投，下次可恢复。
 			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 充值入账失败 trade_no=%s callback_type=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP(), err.Error()))

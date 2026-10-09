@@ -108,7 +108,7 @@ func TestRechargeEpayMySQL_ConcurrentCallbacksCreditOnce(t *testing.T) {
 			go func(idx int) {
 				defer wg.Done()
 				startGate.Wait() // 尽量让所有 goroutine 同时冲进事务
-				credited[idx], errs[idx] = RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+				credited[idx], errs[idx] = RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 			}(i)
 		}
 		startGate.Done()
@@ -148,12 +148,12 @@ func TestRechargeEpayMySQL_IsIdempotentOnReplay(t *testing.T) {
 		topUp := epayFixture(t, tradeNo, userId, 10, 0)
 		expected := int(decimalQuotaForAmount(10))
 
-		first, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+		first, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 		require.NoError(t, err)
 		assert.Equal(t, expected, first)
 
 		for i := 0; i < 3; i++ {
-			again, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+			again, err := RechargeEpay(topUp.TradeNo, "alipay", "10.00", "127.0.0.1")
 			require.NoError(t, err, "重投必须幂等成功")
 			assert.Equal(t, 0, again, "重投不得再次入账")
 		}
@@ -188,7 +188,7 @@ func TestRechargeEpayMySQL_EnforcesQuotaUpperBound(t *testing.T) {
 
 		epayFixture(t, tradeNo, userId, 10, common.MaxQuota-1)
 
-		_, err := RechargeEpay(tradeNo, "alipay", "127.0.0.1")
+		_, err := RechargeEpay(tradeNo, "alipay", "10.00", "127.0.0.1")
 		require.Error(t, err)
 
 		assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, tradeNo))

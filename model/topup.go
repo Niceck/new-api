@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -47,7 +49,29 @@ var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
+	// ErrTopUpAmountMismatch：易支付回调里的金额与订单应付金额不一致。
+	ErrTopUpAmountMismatch = errors.New("topup amount mismatch")
 )
+
+// EpayOrderMoney 是下单时发给易支付平台的金额文本（保留两位小数）。结算时回调金额
+// 要与它比对，所以下单与结算必须用同一个函数，不能各写各的取整。
+func EpayOrderMoney(money float64) string {
+	return strconv.FormatFloat(money, 'f', 2, 64)
+}
+
+// epayAmountMatches 报告回调金额是否等于订单应付金额。按数值比："10" 与 "10.00"
+// 是同一笔钱；解析不了的（空、非数字、NaN）一律算不符。
+func epayAmountMatches(orderMoney float64, paidMoney string) bool {
+	paid, err := decimal.NewFromString(strings.TrimSpace(paidMoney))
+	if err != nil {
+		return false
+	}
+	expected, err := decimal.NewFromString(EpayOrderMoney(orderMoney))
+	if err != nil {
+		return false
+	}
+	return paid.Equal(expected)
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error
@@ -333,7 +357,7 @@ func decimalQuotaForAmount(amount int64) int64 {
 // 若订单先标成功、额度另起一个事务再加，中间失败就变成「订单成功但没到账」
 // （reconcile_topup.py 的形态 B），只能靠人工补单。与 Recharge(Stripe)、
 // RechargeCreem 同构：行级锁 + 幂等判定 + 行内 quota + ?。
-func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (creditedQuota int, err error) {
+func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney string, callerIp string) (creditedQuota int, err error) {
 	if tradeNo == "" {
 		return 0, errors.New("未提供支付单号")
 	}
@@ -370,6 +394,13 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 		}
 		if topUp.Status != common.TopUpStatusPending {
 			return ErrTopUpStatusInvalid
+		}
+		// 金额比对：验签只证明通知出自持有商户密钥的一方，额度却按本地订单的
+		// Amount 入账——金额更小却指向这张订单的通知一旦放行，就是花小钱拿大额度。
+		// 不符就不入账，订单留在 pending，交给对账巡检与人工核实。
+		if !epayAmountMatches(topUp.Money, paidMoney) {
+			return fmt.Errorf("%w: order_money=%s callback_money=%q",
+				ErrTopUpAmountMismatch, EpayOrderMoney(topUp.Money), paidMoney)
 		}
 
 		quotaToAdd := decimalQuotaForAmount(topUp.Amount)
