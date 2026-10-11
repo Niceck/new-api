@@ -62,14 +62,27 @@ export function formatCurrency(amount: number | string): string {
 }
 
 /**
- * Get discount label for display (e.g., "20% OFF")
+ * A discount rate expressed the two ways locales word it: `percent` is how
+ * much is taken off (3 for a 0.97 rate, "3% OFF"), `fold` is the Chinese 折
+ * figure, i.e. the share still paid in tenths ("9.7 折"). The caller passes
+ * both to the translation and each locale uses whichever reads naturally.
+ * Returns null when the rate is not a real discount.
  */
-export function getDiscountLabel(discount: number): string {
-  if (discount >= DEFAULT_DISCOUNT_RATE) {
-    return ''
+export function getDiscountParts(
+  discount: number
+): { percent: number; fold: string } | null {
+  if (
+    !Number.isFinite(discount) ||
+    discount <= 0 ||
+    discount >= DEFAULT_DISCOUNT_RATE
+  ) {
+    return null
   }
-  const off = Math.round((1 - discount) * 100)
-  return `${off}% OFF`
+  return {
+    percent: Math.round((1 - discount) * 100),
+    // toFixed first: 0.97 * 10 is 9.700000000000001 in floating point
+    fold: String(Number((discount * 10).toFixed(2))),
+  }
 }
 
 /**

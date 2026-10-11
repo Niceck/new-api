@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils'
 import { PAYMENT_TYPES } from '../constants'
 import {
   formatCurrency,
-  getDiscountLabel,
+  getDiscountParts,
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
@@ -266,6 +266,9 @@ export function RechargeFormCard({
                         discount,
                         usdExchangeRate
                       )
+                      const discountParts = hasDiscount
+                        ? getDiscountParts(discount)
+                        : null
                       return (
                         <Button
                           key={preset.value}
@@ -282,18 +285,23 @@ export function RechargeFormCard({
                             <div className='text-base font-semibold sm:text-lg'>
                               {formatNumber(displayValue)}
                             </div>
-                            {hasDiscount && (
+                            {discountParts && (
                               <div className='text-xs font-medium text-green-600'>
-                                {getDiscountLabel(discount)}
+                                {t('{{percent}}% OFF', discountParts)}
                               </div>
                             )}
                           </div>
                           <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                            Pay {formatCurrency(actualPrice)}
+                            {t('Pay {{amount}}', {
+                              amount: formatCurrency(actualPrice),
+                            })}
                             {hasDiscount && savedAmount > 0 && (
                               <span className='text-green-600'>
                                 {' '}
-                                • Save {formatCurrency(savedAmount)}
+                                •{' '}
+                                {t('Save {{amount}}', {
+                                  amount: formatCurrency(savedAmount),
+                                })}
                               </span>
                             )}
                           </div>

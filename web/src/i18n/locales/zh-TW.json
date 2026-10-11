@@ -5364,6 +5364,9 @@
     "Keep the client you already use,": "用戶端照舊，",
     "change one address": "只換一個位址",
     "Create an account, top up, create a token for your line, and pay only for what you use.": "註冊帳號、儲值、依線路建立令牌，按實際用量付費。",
-    "Install the official client": "安裝官方用戶端"
+    "Install the official client": "安裝官方用戶端",
+    "{{percent}}% OFF": "{{fold}} 折",
+    "Pay {{amount}}": "實付 {{amount}}",
+    "Save {{amount}}": "省 {{amount}}"
   }
 }

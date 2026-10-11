@@ -5365,6 +5365,9 @@
     "Keep the client you already use,": "Giữ nguyên ứng dụng bạn đang dùng,",
     "change one address": "chỉ đổi một địa chỉ",
     "Create an account, top up, create a token for your line, and pay only for what you use.": "Tạo tài khoản, nạp tiền, tạo token cho tuyến của bạn và chỉ trả cho phần đã dùng.",
-    "Install the official client": "Cài đặt ứng dụng chính thức"
+    "Install the official client": "Cài đặt ứng dụng chính thức",
+    "{{percent}}% OFF": "Giảm {{percent}}%",
+    "Pay {{amount}}": "Thanh toán {{amount}}",
+    "Save {{amount}}": "Tiết kiệm {{amount}}"
   }
 }

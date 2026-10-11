@@ -5365,6 +5365,9 @@
     "Keep the client you already use,": "Оставьте привычный клиент,",
     "change one address": "замените один адрес",
     "Create an account, top up, create a token for your line, and pay only for what you use.": "Создайте аккаунт, пополните баланс, создайте токен для нужной линии и платите только за использование.",
-    "Install the official client": "Установите официальный клиент"
+    "Install the official client": "Установите официальный клиент",
+    "{{percent}}% OFF": "−{{percent}}%",
+    "Pay {{amount}}": "К оплате {{amount}}",
+    "Save {{amount}}": "Экономия {{amount}}"
   }
 }

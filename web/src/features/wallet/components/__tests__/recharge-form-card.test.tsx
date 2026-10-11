@@ -60,6 +60,17 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {} })
 
+// The real Simplified Chinese locale, initialised the way src/i18n/config.ts does.
+const zhLocale = (await import('@/i18n/locales/zh.json')).default
+const i18nZh = createInstance()
+await i18nZh.use(initReactI18next).init({
+  lng: 'zhCN',
+  fallbackLng: 'en',
+  nsSeparator: false,
+  resources: { zhCN: zhLocale },
+  interpolation: { escapeValue: false },
+})
+
 const topupInfo: TopupInfo = {
   enable_online_topup: false,
   enable_stripe_topup: false,
@@ -177,5 +188,77 @@ describe('RechargeFormCard TRON compatibility', () => {
 
     await act(async () => root.unmount())
     container.remove()
+  })
+})
+
+describe('RechargeFormCard preset discount wording', () => {
+  const tiers = [100, 200, 500, 1000, 2000]
+  const discount = { 200: 0.98, 500: 0.97, 1000: 0.95, 2000: 0.92 }
+
+  async function presetCardTexts(instance: typeof i18n): Promise<string[]> {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={instance}>
+          <RechargeFormCard
+            topupInfo={{ ...topupInfo, amount_options: tiers, discount }}
+            presetAmounts={tiers.map((value) => ({ value }))}
+            selectedPreset={null}
+            onSelectPreset={() => undefined}
+            topupAmount={100}
+            onTopupAmountChange={() => undefined}
+            paymentAmount={100}
+            calculating={false}
+            onPaymentMethodSelect={() => undefined}
+            paymentLoading={null}
+            redemptionCode=''
+            onRedemptionCodeChange={() => undefined}
+            onRedeem={() => undefined}
+            redeeming={false}
+          />
+        </I18nextProvider>
+      )
+    })
+    // Preset cards are the only buttons carrying the min-h-16 sizing class.
+    const texts = [...container.querySelectorAll('button')]
+      .filter((button) => button.className.includes('min-h-16'))
+      .map((button) =>
+        (button.textContent ?? '').replaceAll(/\s+/g, ' ').trim()
+      )
+    await act(async () => root.unmount())
+    container.remove()
+    return texts
+  }
+
+  test('English keeps the percent-off wording', async () => {
+    const texts = await presetCardTexts(i18n)
+    assert.equal(texts.length, 5)
+    assert.equal(texts[0], '100Pay 100')
+    assert.equal(texts[1], '2002% OFFPay 196 • Save 4')
+    assert.equal(texts[2], '5003% OFFPay 485 • Save 15')
+    assert.match(texts[3] ?? '', /5% OFFPay 950 • Save 50$/)
+    assert.match(texts[4] ?? '', /8% OFFPay 1,840 • Save 160$/)
+  })
+
+  test('Simplified Chinese says 折 / 实付 / 省 and leaves no English behind', async () => {
+    const texts = await presetCardTexts(i18nZh)
+    assert.equal(texts.length, 5)
+    assert.equal(texts[0], '100实付 100')
+    assert.equal(texts[1], '2009.8 折实付 196 • 省 4')
+    assert.equal(texts[2], '5009.7 折实付 485 • 省 15')
+    assert.match(texts[3] ?? '', /9\.5 折实付 950 • 省 50$/)
+    assert.match(texts[4] ?? '', /9\.2 折实付 1,840 • 省 160$/)
+    for (const text of texts) {
+      assert.doesNotMatch(text, /OFF|Pay|Save/)
+    }
+  })
+
+  test('a tier without a discount shows the price only', async () => {
+    for (const instance of [i18n, i18nZh]) {
+      const [first] = await presetCardTexts(instance)
+      assert.doesNotMatch(first ?? '', /OFF|折|Save|省/)
+    }
   })
 })
