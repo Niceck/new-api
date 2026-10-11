@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -82,12 +83,36 @@ func (e *TopUpWalletFullError) Is(target error) bool {
 }
 
 // topUpCreditQuota 是这张订单入账时会加的额度，与各渠道结算函数同一口径：
-// Stripe 订单按 Money，其余按 Amount。
+// Stripe 按 Money × QuotaPerUnit；Creem 的 Amount 本身就是额度；其余按 Amount × QuotaPerUnit。
+//
+// 结果被夹在 [0, 上限+1]：先比较完整的十进制数再转整数。数量离谱的订单乘出来会超过
+// int64，直接转换会绕回成一个看似正常的值（2^64 附近的乘积绕回后是个小正数）——那样的
+// 订单要么通过容量判断，要么把占用算小。超过上限的一律算「上限 + 1」，非正数算 0。
 func topUpCreditQuota(topUp *TopUp) int64 {
-	if topUp.PaymentProvider == PaymentProviderStripe {
-		return decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart()
+	overLimit := int64(common.MaxQuota) + 1
+	var credit decimal.Decimal
+	switch topUp.PaymentProvider {
+	case PaymentProviderStripe:
+		// decimal.NewFromFloat 遇到 NaN / Inf 会 panic
+		if math.IsNaN(topUp.Money) || math.IsInf(topUp.Money, 1) {
+			return overLimit
+		}
+		if math.IsInf(topUp.Money, -1) {
+			return 0
+		}
+		credit = decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	case PaymentProviderCreem:
+		credit = decimal.NewFromInt(topUp.Amount)
+	default:
+		credit = decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	}
-	return decimalQuotaForAmount(topUp.Amount)
+	if credit.Sign() <= 0 {
+		return 0
+	}
+	if credit.GreaterThan(decimal.NewFromInt(int64(common.MaxQuota))) {
+		return overLimit
+	}
+	return credit.IntPart()
 }
 
 // topUpCapacityTx 锁住用户行并算出当前的容量账目。必须在事务里调用，调用方随后在同一

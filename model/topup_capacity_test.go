@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -299,4 +300,76 @@ func TestManualCompleteTopUp_RefusesSingleOrderLargerThanTheWallet(t *testing.T)
 	require.Error(t, ManualCompleteTopUp("cap-manual-huge", "127.0.0.1"))
 	assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, "cap-manual-huge"))
 	assert.Zero(t, userQuota(t, 93032))
+}
+
+// 占用额度要与各渠道结算时实际入账的额度同一口径，否则会把钱包误判成满的（或没满）。
+func TestTopUpCreditQuota_FollowsEachProvidersSettlementRule(t *testing.T) {
+	unit := int64(common.QuotaPerUnit)
+	assert.Equal(t, 10*unit, topUpCreditQuota(&TopUp{PaymentProvider: PaymentProviderEpay, Amount: 10, Money: 73}))
+	assert.Equal(t, 10*unit, topUpCreditQuota(&TopUp{PaymentProvider: PaymentProviderWaffo, Amount: 10, Money: 73}))
+	// Stripe 按 Money（经分组倍率换算后的数量）入账，不看 Amount
+	assert.Equal(t, 12*unit+unit/2, topUpCreditQuota(&TopUp{PaymentProvider: PaymentProviderStripe, Amount: 10, Money: 12.5}))
+	// Creem 的 Amount 本身就是额度，不能再乘一遍
+	assert.Equal(t, int64(300_000), topUpCreditQuota(&TopUp{PaymentProvider: PaymentProviderCreem, Amount: 300_000}))
+}
+
+// 先比较完整的十进制数再转整数：超大数量乘出来超过 int64 时，转换会绕回成一个看似正常的值。
+func TestTopUpCreditQuota_SaturatesInsteadOfOverflowing(t *testing.T) {
+	limit := int64(common.MaxQuota)
+	absurd := []*TopUp{
+		{PaymentProvider: PaymentProviderEpay, Amount: 1_000_000_000_000_000}, // × 500000 = 5e20，超过 int64
+		{PaymentProvider: PaymentProviderEpay, Amount: 36_893_488_147_420},    // × 500000 ≈ 2^64 + 小量，绕回后是个小正数
+		{PaymentProvider: PaymentProviderStripe, Money: 1e300},
+		{PaymentProvider: PaymentProviderStripe, Money: math.Inf(1)},
+		{PaymentProvider: PaymentProviderStripe, Money: math.NaN()},
+		{PaymentProvider: PaymentProviderCreem, Amount: math.MaxInt64},
+	}
+	for _, order := range absurd {
+		credit := topUpCreditQuota(order)
+		assert.Equal(t, limit+1, credit, "超过上限的一律按「上限 + 1」算：%+v", order)
+		assert.False(t, TopUpCapacity{Limit: limit}.Fits(credit))
+	}
+	// 非正数不是充值：不占容量，也不可能通过 Fits
+	for _, order := range []*TopUp{
+		{PaymentProvider: PaymentProviderEpay, Amount: 0},
+		{PaymentProvider: PaymentProviderEpay, Amount: -5},
+		{PaymentProvider: PaymentProviderEpay, Amount: math.MinInt64},
+		{PaymentProvider: PaymentProviderStripe, Money: -1e300},
+		{PaymentProvider: PaymentProviderStripe, Money: math.Inf(-1)},
+	} {
+		assert.Zero(t, topUpCreditQuota(order), "%+v", order)
+	}
+}
+
+func TestInsertTopUpWithinWalletCapacity_RejectsAbsurdAmountWithoutOverflow(t *testing.T) {
+	capacityUser(t, 93040, 0)
+	requireWalletFull(t, InsertTopUpWithinWalletCapacity(epayOrder(93040, "cap-absurd", 36_893_488_147_420, capacityNow)))
+	assert.False(t, orderExists(t, "cap-absurd"))
+}
+
+// 库里已有一张数量离谱的待付单（历史脏数据）：按「占满」保守处理，而不是让它绕回成一个小数。
+func TestInsertTopUpWithinWalletCapacity_TreatsAbnormalPendingOrderAsFillingTheWallet(t *testing.T) {
+	capacityUser(t, 93041, 0)
+	seedOrder(t, epayOrder(93041, "cap-dirty", 36_893_488_147_420, capacityNow-10), common.TopUpStatusPending)
+	requireWalletFull(t, InsertTopUpWithinWalletCapacity(epayOrder(93041, "cap-after-dirty", 10, capacityNow)))
+}
+
+func TestManualCompleteTopUp_RefusesAbsurdAmountWithoutOverflow(t *testing.T) {
+	capacityUser(t, 93042, 0)
+	seedOrder(t, epayOrder(93042, "cap-manual-absurd", 36_893_488_147_420, capacityNow), common.TopUpStatusPending)
+
+	require.Error(t, ManualCompleteTopUp("cap-manual-absurd", "127.0.0.1"))
+	assert.Equal(t, common.TopUpStatusPending, topUpStatus(t, "cap-manual-absurd"))
+	assert.Zero(t, userQuota(t, 93042))
+}
+
+// 补单与回调入账用同一个口径：Creem 订单的 Amount 已经是额度。
+func TestManualCompleteTopUp_CreditsCreemOrderByItsAmount(t *testing.T) {
+	capacityUser(t, 93043, 0)
+	order := epayOrder(93043, "cap-manual-creem", 300_000, capacityNow)
+	order.PaymentProvider, order.PaymentMethod = PaymentProviderCreem, PaymentMethodCreem
+	seedOrder(t, order, common.TopUpStatusPending)
+
+	require.NoError(t, ManualCompleteTopUp("cap-manual-creem", "127.0.0.1"))
+	assert.Equal(t, 300_000, userQuota(t, 93043))
 }

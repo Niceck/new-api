@@ -489,20 +489,14 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return errors.New("订单状态不是待支付，无法补单")
 		}
 
-		// 计算应充值额度：
-		// - Stripe 订单：Money 代表经分组倍率换算后的美元数量，直接 * QuotaPerUnit
-		// - 其他订单（如易支付）：Amount 为美元数量，* QuotaPerUnit
-		if topUp.PaymentProvider == PaymentProviderStripe {
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
-		} else {
-			dAmount := decimal.NewFromInt(topUp.Amount)
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
-		}
-		if quotaToAdd <= 0 || quotaToAdd > common.MaxQuota {
+		// 应充值额度与各渠道回调入账同一口径（topUpCreditQuota）：Stripe 按 Money，
+		// Creem 的 Amount 本身就是额度，其余按 Amount * QuotaPerUnit。它先比较再转整数，
+		// 数量离谱的订单不会在转换时绕回成一个看似正常的值。
+		credit := topUpCreditQuota(topUp)
+		if credit <= 0 || credit > int64(common.MaxQuota) {
 			return errors.New("无效的充值额度")
 		}
+		quotaToAdd = int(credit)
 
 		// 钱包上限：与回调入账（RechargeEpay）同一道检查。补到上限以外的话，这个用户
 		// 之后的每一笔充值都会在入账环节被拒，付了款却卡在待处理。

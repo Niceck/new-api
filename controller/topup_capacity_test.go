@@ -38,14 +38,17 @@ func TestTopUpWalletFullMessage_TellsHowMuchStillFits(t *testing.T) {
 	message := topUpWalletFullMessage(walletFull(2522, 0, 0), 1)
 	assert.Contains(t, message, "钱包上限")
 	assert.Contains(t, message, "最多可充 1772")
-	assert.NotContains(t, message, "未完成")
+	assert.NotContains(t, message, "尚未支付")
 }
 
 func TestTopUpWalletFullMessage_MentionsPendingOrdersHoldingRoom(t *testing.T) {
 	withQuotaPerUnit(t, 500_000)
 	message := topUpWalletFullMessage(walletFull(522, 2000, 1), 1)
 	assert.Contains(t, message, "最多可充 1772")
-	assert.Contains(t, message, "1 笔未完成的充值订单")
+	assert.Contains(t, message, "已计入 1 笔尚未支付的充值订单")
+	// 支付完成后占用变成余额，可充数量并不会增加——不能说「支付完成后释放」
+	assert.NotContains(t, message, "支付完成")
+	assert.Contains(t, message, "过期")
 }
 
 func TestTopUpWalletFullMessage_WhenNothingFitsSaysSpendFirst(t *testing.T) {
@@ -69,7 +72,9 @@ func TestTopUpWalletFullMessage_UsesRequestUnitsInTokensDisplay(t *testing.T) {
 
 	// 按 tokens 展示时，下单数量的单位就是额度：1772 个充值单位 = 886000000
 	message := topUpWalletFullMessage(walletFull(2522, 0, 0), 1)
-	assert.Contains(t, message, "最多可充 886000000")
+	// 这里给的是整数个充值单位对应的数量：多出来的零头不会入账，所以说「建议」而不是「最多」
+	assert.Contains(t, message, "建议充值数量不超过 886000000")
+	assert.NotContains(t, message, "最多可充")
 }
 
 func seedWalletUser(t *testing.T, userID int, balanceUnits int) {
@@ -115,7 +120,7 @@ func TestRequestEpay_RefusesOrderThatWouldOverflowWallet(t *testing.T) {
 	body = recorder.Body.String()
 	assert.Contains(t, body, `"message":"error"`)
 	assert.Contains(t, body, "最多可充 772")
-	assert.Contains(t, body, "1 笔未完成的充值订单")
+	assert.Contains(t, body, "已计入 1 笔尚未支付的充值订单")
 	assert.Equal(t, int64(1), topUpCount(t, 7101))
 }
 
