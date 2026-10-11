@@ -44,6 +44,21 @@ describe('getDiscountParts', () => {
     assert.equal(getDiscountParts(0.8888)?.fold, '8.89')
   })
 
+  test('does not round a discount into a different one', () => {
+    // 2.5% off must not read as 3% off
+    assert.deepEqual(getDiscountParts(0.975), { percent: 2.5, fold: '9.75' })
+    assert.deepEqual(getDiscountParts(0.999), { percent: 0.1, fold: '9.99' })
+    assert.deepEqual(getDiscountParts(0.8888), { percent: 11.12, fold: '8.89' })
+    assert.deepEqual(getDiscountParts(0.005), { percent: 99.5, fold: '0.05' })
+  })
+
+  test('shows no badge rather than one that reads as free or as no discount', () => {
+    // 0.9999 would round to "10 折"; 0.0001 to "0 折" / "100% OFF"
+    for (const rate of [0.9999, 0.99996, 0.0001, 0.00004]) {
+      assert.equal(getDiscountParts(rate), null, String(rate))
+    }
+  })
+
   test('is null when the rate is not a real discount', () => {
     for (const rate of [
       1,

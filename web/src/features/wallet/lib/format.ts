@@ -66,7 +66,11 @@ export function formatCurrency(amount: number | string): string {
  * much is taken off (3 for a 0.97 rate, "3% OFF"), `fold` is the Chinese 折
  * figure, i.e. the share still paid in tenths ("9.7 折"). The caller passes
  * both to the translation and each locale uses whichever reads naturally.
- * Returns null when the rate is not a real discount.
+ *
+ * Both figures keep two decimals so a 2.5% discount does not read as 3%.
+ * Returns null when the rate is not a real discount, and also when rounding
+ * would make a real one read as "no discount" or "free" (0.9999 → "10 折",
+ * 0.0001 → "0 折"): the card then shows the amounts without a badge.
  */
 export function getDiscountParts(
   discount: number
@@ -78,11 +82,13 @@ export function getDiscountParts(
   ) {
     return null
   }
-  return {
-    percent: Math.round((1 - discount) * 100),
-    // toFixed first: 0.97 * 10 is 9.700000000000001 in floating point
-    fold: String(Number((discount * 10).toFixed(2))),
+  // toFixed first: 0.97 * 10 is 9.700000000000001 in floating point
+  const percent = Number(((1 - discount) * 100).toFixed(2))
+  const fold = Number((discount * 10).toFixed(2))
+  if (percent <= 0 || percent >= 100 || fold <= 0 || fold >= 10) {
+    return null
   }
+  return { percent, fold: String(fold) }
 }
 
 /**

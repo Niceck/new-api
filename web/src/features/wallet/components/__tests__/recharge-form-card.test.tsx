@@ -255,6 +255,48 @@ describe('RechargeFormCard preset discount wording', () => {
     }
   })
 
+  test('a rate too close to 1 keeps the amounts but drops the badge', async () => {
+    // 0.9999 would otherwise read "10 折" next to a price that is 0.01 lower
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18nZh}>
+          <RechargeFormCard
+            topupInfo={{
+              ...topupInfo,
+              amount_options: [100],
+              discount: { 100: 0.9999 },
+            }}
+            presetAmounts={[{ value: 100 }]}
+            selectedPreset={null}
+            onSelectPreset={() => undefined}
+            topupAmount={100}
+            onTopupAmountChange={() => undefined}
+            paymentAmount={100}
+            calculating={false}
+            onPaymentMethodSelect={() => undefined}
+            paymentLoading={null}
+            redemptionCode=''
+            onRedemptionCodeChange={() => undefined}
+            onRedeem={() => undefined}
+            redeeming={false}
+          />
+        </I18nextProvider>
+      )
+    })
+    const text = [...container.querySelectorAll('button')]
+      .filter((button) => button.className.includes('min-h-16'))
+      .map((button) =>
+        (button.textContent ?? '').replaceAll(/\s+/g, ' ').trim()
+      )
+      .join('|')
+    assert.equal(text, '100实付 99.99 • 省 0.01')
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
   test('a tier without a discount shows the price only', async () => {
     for (const instance of [i18n, i18nZh]) {
       const [first] = await presetCardTexts(instance)
