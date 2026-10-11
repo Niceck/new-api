@@ -105,6 +105,13 @@ func CreateTronTopupOrder(c *gin.Context) {
 			common.ApiErrorMsg(c, "USDT 充值金额低于最低限额，请提高充值金额")
 			return
 		}
+		// 钱包上限：建单事务里判断的（model.CreateOrGetActiveTronTopupOrder），订单没有创建。
+		var walletFull *model.TopUpWalletFullError
+		if errors.As(err, &walletFull) {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("TRON 充值订单未创建：入账后会超出钱包上限 user_id=%d amount=%d detail=%q", userID, request.Amount, walletFull.Error()))
+			common.ApiErrorMsg(c, topUpWalletFullMessage(walletFull, max(getMinTopup(), getTronMinTopup())))
+			return
+		}
 		logger.LogWarn(c.Request.Context(), "create TRON top-up order failed: "+err.Error())
 		common.ApiErrorMsg(c, "TRON 充值订单创建失败，请稍后重试")
 		return

@@ -178,6 +178,11 @@ func CreateOrGetActiveTronTopupOrder(topUp *TopUp, order *TronTopupOrder, nowMS 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		// 钱包容量：复用已有的有效订单不新增占用，只有真要新建时才判断（见 topup_capacity.go）。
+		// 用户行在本事务开头已经锁住，这里读到的余额与待付订单不会被并发下单改掉。
+		if err := requireTopUpRoomTx(tx, topUp.UserId, int64(order.CreditQuota), nowMS); err != nil {
+			return err
+		}
 		if err := tx.Create(topUp).Error; err != nil {
 			return err
 		}

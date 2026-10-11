@@ -500,8 +500,18 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
 		}
-		if quotaToAdd <= 0 {
+		if quotaToAdd <= 0 || quotaToAdd > common.MaxQuota {
 			return errors.New("无效的充值额度")
+		}
+
+		// 钱包上限：与回调入账（RechargeEpay）同一道检查。补到上限以外的话，这个用户
+		// 之后的每一笔充值都会在入账环节被拒，付了款却卡在待处理。
+		user := &User{}
+		if err := lockForUpdate(tx).Select("id", "quota").Where("id = ?", topUp.UserId).First(user).Error; err != nil {
+			return err
+		}
+		if int64(user.Quota) > int64(common.MaxQuota)-int64(quotaToAdd) {
+			return errors.New("补单后额度超出钱包上限：等用户用掉一部分余额后再补，或走退款")
 		}
 
 		// 标记完成

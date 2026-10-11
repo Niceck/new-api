@@ -26,6 +26,10 @@ const legacyTronRefreshMessage = "页面已更新，请刷新后重新发起 TRO
 
 var isTopupComplianceConfirmed = operation_setting.IsPaymentComplianceConfirmed
 
+// getTopUpUserGroup 是易支付下单读取用户分组的入口；做成变量是为了测试能替换
+// （model.GetUserGroup 依赖的列名只在模型包初始化时设置），与 getTronUserGroup 同一个做法。
+var getTopUpUserGroup = model.GetUserGroup
+
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := isTopupComplianceConfirmed()
 
@@ -222,7 +226,7 @@ func RequestEpay(c *gin.Context) {
 	}
 
 	id := c.GetInt("id")
-	group, err := model.GetUserGroup(id, true)
+	group, err := getTopUpUserGroup(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
@@ -278,7 +282,15 @@ func RequestEpay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
-	err = topUp.Insert()
+	// 钱包上限在这里就判断，与建单同一个事务：入账环节也会拦超限，但那时客户已经付了钱，
+	// 订单只能卡在待处理。被拒的订单不落库，支付链接也不交出去。
+	err = model.InsertTopUpWithinWalletCapacity(topUp)
+	var walletFull *model.TopUpWalletFullError
+	if errors.As(err, &walletFull) {
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单未创建：入账后会超出钱包上限 user_id=%d payment_method=%s amount=%d detail=%q", id, req.PaymentMethod, req.Amount, walletFull.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpWalletFullMessage(walletFull, getMinTopup())})
+		return
+	}
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 创建充值订单失败 user_id=%d trade_no=%s payment_method=%s amount=%d error=%q", id, tradeNo, req.PaymentMethod, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
