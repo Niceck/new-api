@@ -57,3 +57,33 @@ export function formatTronCNYValue(
   const fraction = String(scaledCents % 100n).padStart(2, '0')
   return `${whole}.${fraction}`
 }
+
+/**
+ * For a settled TRON top-up that was paid short, the share of the face value
+ * that was actually credited (between 0 and 1). Null when the record is not a
+ * part-credited TRON top-up, so callers show nothing extra.
+ */
+export function tronPartCreditShare(record: {
+  tron_credited_quota?: number
+  tron_face_quota?: number
+}): number | null {
+  const credited = record.tron_credited_quota ?? 0
+  const face = record.tron_face_quota ?? 0
+  if (credited <= 0 || face <= 0 || credited >= face) {
+    return null
+  }
+  return credited / face
+}
+
+/** Whether a TRON order advertises an automatic range for inexact amounts. */
+export function hasTronTolerance(order: {
+  tolerant_match?: boolean
+  tolerant_min_usdt_micros?: number
+  tolerant_max_usdt_micros?: number
+}): boolean {
+  return (
+    order.tolerant_match === true &&
+    (order.tolerant_min_usdt_micros ?? 0) > 0 &&
+    (order.tolerant_max_usdt_micros ?? 0) > 0
+  )
+}

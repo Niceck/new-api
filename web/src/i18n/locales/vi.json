@@ -5368,6 +5368,17 @@
     "Install the official client": "Cài đặt ứng dụng chính thức",
     "{{percent}}% OFF": "Giảm {{percent}}%",
     "Pay {{amount}}": "Thanh toán {{amount}}",
-    "Save {{amount}}": "Tiết kiệm {{amount}}"
+    "Save {{amount}}": "Tiết kiệm {{amount}}",
+    "Send at least the amount due before the countdown ends": "Hãy chuyển ít nhất số tiền cần thanh toán trước khi hết thời gian đếm ngược",
+    "Amount due": "Số tiền cần thanh toán",
+    "Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT": "Tự động ghi có khi số tiền nhận được nằm trong khoảng {{min}} đến {{max}} USDT",
+    "Paying more adds no credit and is not refunded": "Trả thừa không được cộng thêm và không được hoàn lại",
+    "Paying less is credited in proportion and settles this order — create a new order to top up the difference": "Trả thiếu sẽ được ghi có theo tỷ lệ và đơn này được tất toán — hãy tạo đơn mới để nạp phần còn thiếu",
+    "Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review": "Nếu ngoài khoảng trên, đến sau thời hạn hoặc không xác định được người thanh toán, hãy gửi yêu cầu để được xem xét thủ công",
+    "Amount received": "Số tiền nhận được",
+    "Amount credited": "Số tiền đã ghi có",
+    "Paid less than the amount due, so it was credited in proportion and this order is settled": "Số tiền nhận được ít hơn số cần thanh toán nên đã ghi có theo tỷ lệ và đơn này đã tất toán",
+    "Paid more than the amount due, so the face value of the order was credited": "Số tiền nhận được nhiều hơn số cần thanh toán nên đã ghi có theo mệnh giá của đơn",
+    "Credited {{credited}} for {{received}} USDT received": "Đã ghi có {{credited}} cho {{received}} USDT nhận được"
   }
 }

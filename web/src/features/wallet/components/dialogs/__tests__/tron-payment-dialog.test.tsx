@@ -356,4 +356,145 @@ describe('TronPaymentDialog', () => {
     await act(async () => rendered.root.unmount())
     rendered.container.remove()
   })
+
+  const tolerantOrder: TronTopupOrder = {
+    ...order,
+    tolerant_match: true,
+    tolerant_min_usdt_micros: 12_412_111,
+    tolerant_max_usdt_micros: 15_170_357,
+  }
+  const newWording = [
+    'Send at least the amount due before the countdown ends',
+    'Amount due',
+    'Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT',
+    'Paying more adds no credit and is not refunded',
+    'Paying less is credited in proportion and settles this order — create a new order to top up the difference',
+    'Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review',
+    'Amount received',
+    'Amount credited',
+    'Paid less than the amount due, so it was credited in proportion and this order is settled',
+    'Paid more than the amount due, so the face value of the order was credited',
+    'Credited {{credited}} for {{received}} USDT received',
+  ]
+
+  async function bodyTextFor(shown: TronTopupOrder): Promise<string> {
+    const rendered = await renderDialog({ order: shown })
+    const bodyText = document.body.textContent ?? ''
+    await act(async () => rendered.root.unmount())
+    rendered.container.remove()
+    return bodyText
+  }
+
+  test('states the automatic range and the over and under rules when tolerant matching is on', async () => {
+    const bodyText = await bodyTextFor(tolerantOrder)
+    for (const expected of [
+      'Send at least the amount due before the countdown ends',
+      'Amount due',
+      'Credited automatically when the amount that arrives is between 12.412111 and 15.170357 USDT',
+      'Paying more adds no credit and is not refunded',
+      'Paying less is credited in proportion and settles this order',
+      'submit a claim for manual review',
+    ]) {
+      assert.equal(bodyText.includes(expected), true, expected)
+    }
+    assert.equal(
+      bodyText.includes('Send the exact amount before the countdown ends.'),
+      false
+    )
+    assert.equal(
+      bodyText.includes(
+        'Make sure the amount that arrives equals the exact amount.'
+      ),
+      false
+    )
+  })
+
+  test('keeps the exact-amount wording when tolerant matching is off', async () => {
+    const bodyText = await bodyTextFor(order)
+    assert.equal(
+      bodyText.includes('Send the exact amount before the countdown ends.'),
+      true
+    )
+    assert.equal(bodyText.includes('Exact amount'), true)
+    assert.equal(
+      bodyText.includes('Paying more adds no credit and is not refunded'),
+      false
+    )
+    assert.equal(bodyText.includes('Credited automatically'), false)
+  })
+
+  test('shows what arrived and what was credited for an underpaid order', async () => {
+    const bodyText = await bodyTextFor({
+      ...tolerantOrder,
+      status: 'success',
+      received_usdt_micros: 12_900_000,
+      credited_quota: 46_769_000,
+      match_mode: 'tolerant',
+    })
+    assert.equal(bodyText.includes('Amount received'), true)
+    assert.equal(bodyText.includes('12.900000 USDT'), true)
+    assert.equal(bodyText.includes('Amount credited'), true)
+    assert.equal(
+      bodyText.includes(
+        'Paid less than the amount due, so it was credited in proportion and this order is settled'
+      ),
+      true
+    )
+    assert.equal(bodyText.includes('Paid more than the amount due'), false)
+  })
+
+  test('explains that an overpaid order was credited at face value', async () => {
+    const bodyText = await bodyTextFor({
+      ...tolerantOrder,
+      status: 'success',
+      received_usdt_micros: 14_000_000,
+      credited_quota: 50_000_000,
+      match_mode: 'tolerant',
+    })
+    assert.equal(bodyText.includes('14.000000 USDT'), true)
+    assert.equal(
+      bodyText.includes(
+        'Paid more than the amount due, so the face value of the order was credited'
+      ),
+      true
+    )
+    assert.equal(bodyText.includes('Paid less than the amount due'), false)
+  })
+
+  test('an exactly paid order needs no settlement note', async () => {
+    const bodyText = await bodyTextFor({
+      ...tolerantOrder,
+      status: 'success',
+      received_usdt_micros: order.expected_usdt_micros,
+      credited_quota: 50_000_000,
+      match_mode: 'exact',
+    })
+    assert.equal(bodyText.includes('Amount received'), false)
+    assert.equal(bodyText.includes('Paid less than the amount due'), false)
+    assert.equal(bodyText.includes('Paid more than the amount due'), false)
+  })
+
+  test('every locale carries the new wording under keys without periods', async () => {
+    for (const locale of ['en', 'zh', 'zh-TW', 'ja', 'fr', 'ru', 'vi']) {
+      const messages = (await import(`@/i18n/locales/${locale}.json`)).default
+        .translation as Record<string, string>
+      for (const key of newWording) {
+        assert.equal(key.includes('.'), false, key)
+        assert.equal(typeof messages[key], 'string', `${locale}: ${key}`)
+        assert.notEqual(messages[key].trim(), '', `${locale}: ${key}`)
+        if (locale === 'en') {
+          assert.equal(messages[key], key)
+        } else {
+          assert.notEqual(messages[key], key, `${locale}: ${key}`)
+        }
+        for (const placeholder of key.match(/{{\w+}}/g) ?? []) {
+          assert.equal(
+            messages[key].includes(placeholder),
+            true,
+            `${locale}: ${key} keeps ${placeholder}`
+          )
+        }
+      }
+    }
+  })
 })

@@ -76,6 +76,14 @@ export interface TronTopupOrder {
   claim_deadline_ms?: number
   can_claim?: boolean
   review_status?: string
+  /** An amount between the two bounds (inclusive) is credited automatically */
+  tolerant_match?: boolean
+  tolerant_min_usdt_micros?: number
+  tolerant_max_usdt_micros?: number
+  /** Set once settled: what arrived and what was credited */
+  received_usdt_micros?: number
+  credited_quota?: number
+  match_mode?: string
 }
 
 export interface TronTopupTicket {
@@ -305,6 +313,12 @@ export interface TopupRecord {
   complete_time?: number
   /** Payment status */
   status: TopupStatus
+  /** Settled TRON top-ups only: USDT that arrived, in micro units */
+  tron_received_usdt_micros?: number
+  /** Settled TRON top-ups only: quota actually credited */
+  tron_credited_quota?: number
+  /** Settled TRON top-ups only: face quota of the order */
+  tron_face_quota?: number
 }
 
 /**

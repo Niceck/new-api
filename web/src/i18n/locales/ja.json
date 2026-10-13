@@ -5368,6 +5368,17 @@
     "Install the official client": "公式クライアントをインストール",
     "{{percent}}% OFF": "{{percent}}% OFF",
     "Pay {{amount}}": "お支払い {{amount}}",
-    "Save {{amount}}": "{{amount}} お得"
+    "Save {{amount}}": "{{amount}} お得",
+    "Send at least the amount due before the countdown ends": "カウントダウン終了までに、お支払い金額以上の USDT を送金してください",
+    "Amount due": "お支払い金額",
+    "Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT": "着金額が {{min}} 〜 {{max}} USDT の範囲内であれば自動で反映されます",
+    "Paying more adds no credit and is not refunded": "多く支払っても残高は増えず、返金もされません",
+    "Paying less is credited in proportion and settles this order — create a new order to top up the difference": "不足して支払った場合は割合に応じて反映され、この注文は完了となります。差額分は新しい注文を作成してください",
+    "Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review": "範囲外、期限後の着金、または支払いの帰属を確認できない場合は、申請を提出してください（手動で確認します）",
+    "Amount received": "着金額",
+    "Amount credited": "反映額",
+    "Paid less than the amount due, so it was credited in proportion and this order is settled": "着金額がお支払い金額より少なかったため、割合に応じて反映され、この注文は完了しました",
+    "Paid more than the amount due, so the face value of the order was credited": "着金額がお支払い金額より多かったため、注文の額面どおりに反映されました",
+    "Credited {{credited}} for {{received}} USDT received": "着金 {{received}} USDT、反映額 {{credited}}"
   }
 }

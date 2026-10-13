@@ -5367,6 +5367,17 @@
     "Install the official client": "安装官方客户端",
     "{{percent}}% OFF": "{{fold}} 折",
     "Pay {{amount}}": "实付 {{amount}}",
-    "Save {{amount}}": "省 {{amount}}"
+    "Save {{amount}}": "省 {{amount}}",
+    "Send at least the amount due before the countdown ends": "请在倒计时结束前转入不少于应付金额的 USDT",
+    "Amount due": "应付金额",
+    "Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT": "到账金额在 {{min}} ~ {{max}} USDT 之间会自动入账",
+    "Paying more adds no credit and is not refunded": "多付的部分不增加额度，也不退还",
+    "Paying less is credited in proportion and settles this order — create a new order to top up the difference": "少付按比例入账，本单即结清；需要补足请重新下单",
+    "Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review": "超出上述范围、超时到账或无法确认归属时，请提交申诉，由人工处理",
+    "Amount received": "实际到账",
+    "Amount credited": "实际入账",
+    "Paid less than the amount due, so it was credited in proportion and this order is settled": "到账少于应付金额，已按比例入账，本单已结清",
+    "Paid more than the amount due, so the face value of the order was credited": "到账多于应付金额，已按订单面值入账",
+    "Credited {{credited}} for {{received}} USDT received": "实到 {{received}} USDT，实际入账 {{credited}}"
   }
 }

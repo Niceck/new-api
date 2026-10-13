@@ -5368,6 +5368,17 @@
     "Install the official client": "Installer le client officiel",
     "{{percent}}% OFF": "-{{percent}} %",
     "Pay {{amount}}": "Payer {{amount}}",
-    "Save {{amount}}": "Économie {{amount}}"
+    "Save {{amount}}": "Économie {{amount}}",
+    "Send at least the amount due before the countdown ends": "Envoyez au moins le montant dû avant la fin du compte à rebours",
+    "Amount due": "Montant dû",
+    "Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT": "Crédité automatiquement si le montant reçu est compris entre {{min}} et {{max}} USDT",
+    "Paying more adds no credit and is not refunded": "Tout excédent n'ajoute aucun crédit et n'est pas remboursé",
+    "Paying less is credited in proportion and settles this order — create a new order to top up the difference": "Un paiement inférieur est crédité au prorata et solde cette commande — créez une nouvelle commande pour compléter",
+    "Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review": "Hors de cette plage, après l'échéance ou si le paiement ne peut être attribué, soumettez une réclamation pour examen manuel",
+    "Amount received": "Montant reçu",
+    "Amount credited": "Montant crédité",
+    "Paid less than the amount due, so it was credited in proportion and this order is settled": "Montant reçu inférieur au montant dû : crédité au prorata, cette commande est soldée",
+    "Paid more than the amount due, so the face value of the order was credited": "Montant reçu supérieur au montant dû : la valeur nominale de la commande a été créditée",
+    "Credited {{credited}} for {{received}} USDT received": "{{credited}} crédité pour {{received}} USDT reçus"
   }
 }

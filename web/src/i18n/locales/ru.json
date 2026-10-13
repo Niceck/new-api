@@ -5368,6 +5368,17 @@
     "Install the official client": "Установите официальный клиент",
     "{{percent}}% OFF": "−{{percent}}%",
     "Pay {{amount}}": "К оплате {{amount}}",
-    "Save {{amount}}": "Экономия {{amount}}"
+    "Save {{amount}}": "Экономия {{amount}}",
+    "Send at least the amount due before the countdown ends": "Отправьте не меньше суммы к оплате до окончания обратного отсчёта",
+    "Amount due": "Сумма к оплате",
+    "Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT": "Зачисляется автоматически, если поступившая сумма находится в пределах от {{min}} до {{max}} USDT",
+    "Paying more adds no credit and is not refunded": "Переплата не увеличивает зачисление и не возвращается",
+    "Paying less is credited in proportion and settles this order — create a new order to top up the difference": "Неполная оплата зачисляется пропорционально и закрывает этот заказ — чтобы доплатить, создайте новый заказ",
+    "Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review": "Если сумма вне диапазона, платёж поступил после срока или его не удаётся сопоставить, подайте заявку на ручную проверку",
+    "Amount received": "Поступило",
+    "Amount credited": "Зачислено",
+    "Paid less than the amount due, so it was credited in proportion and this order is settled": "Поступило меньше суммы к оплате: зачислено пропорционально, заказ закрыт",
+    "Paid more than the amount due, so the face value of the order was credited": "Поступило больше суммы к оплате: зачислен номинал заказа",
+    "Credited {{credited}} for {{received}} USDT received": "Зачислено {{credited}} за поступившие {{received}} USDT"
   }
 }

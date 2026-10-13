@@ -37,9 +37,11 @@ import {
   formatTronCNYValue,
   formatTronRemaining,
   formatTronUSDTAmount,
+  hasTronTolerance,
   isValidTronTxID,
 } from '../../lib/tron'
 import type { TronTopupOrder } from '../../types'
+import { TronSettlementSummary, TronToleranceRules } from './tron-payment-notes'
 
 interface TronPaymentDialogProps {
   open: boolean
@@ -97,6 +99,7 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
   }
 
   const amount = formatTronUSDTAmount(props.order.expected_usdt_micros)
+  const tolerant = hasTronTolerance(props.order)
   const tokenContract = props.order.token_contract
   const visibleNowMS = props.open ? Date.now() : nowMS
   const expired =
@@ -202,7 +205,9 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
     }
   }
 
-  let paymentDescription = t('Send the exact amount before the countdown ends.')
+  let paymentDescription = tolerant
+    ? t('Send at least the amount due before the countdown ends')
+    : t('Send the exact amount before the countdown ends.')
   if (props.order.status === 'success') {
     paymentDescription = t('Top-up credited successfully')
   } else if (expired) {
@@ -258,7 +263,7 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
           <div className='grid gap-3'>
             <div className='rounded-lg border p-3'>
               <div className='text-muted-foreground text-xs font-medium uppercase'>
-                {t('Exact amount')}
+                {tolerant ? t('Amount due') : t('Exact amount')}
               </div>
               <div className='mt-1 flex min-w-0 items-center justify-between gap-2'>
                 <span className='font-mono text-lg font-semibold tabular-nums'>
@@ -275,11 +280,15 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
                   {t('Copy')}
                 </Button>
               </div>
-              <p className='text-muted-foreground mt-2 text-xs leading-5'>
-                {t(
-                  'Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.'
-                )}
-              </p>
+              {tolerant ? (
+                <TronToleranceRules order={props.order} />
+              ) : (
+                <p className='text-muted-foreground mt-2 text-xs leading-5'>
+                  {t(
+                    'Exchange withdrawals may deduct a network fee from the amount sent. Make sure the amount that arrives equals the exact amount.'
+                  )}
+                </p>
+              )}
             </div>
 
             <div className='rounded-lg border p-3'>
@@ -358,6 +367,7 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
             </dl>
           </div>
 
+          <TronSettlementSummary order={props.order} />
           <div className='flex items-center justify-between rounded-lg border px-3 py-2 text-sm'>
             <span className='text-muted-foreground'>{t('Payment status')}</span>
             {statusContent}

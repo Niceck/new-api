@@ -55,6 +55,7 @@ import {
   getPaymentMethodName,
   formatTimestamp,
 } from '../../lib/billing'
+import { formatTronUSDTAmount, tronPartCreditShare } from '../../lib/tron'
 
 interface BillingHistoryDialogProps {
   open: boolean
@@ -258,6 +259,27 @@ export function BillingHistoryDialog({
                               abbreviate: false,
                             })}
                           </div>
+                          {tronPartCreditShare(record) != null ? (
+                            <div className='text-muted-foreground text-xs'>
+                              {t(
+                                'Credited {{credited}} for {{received}} USDT received',
+                                {
+                                  credited: formatCurrencyFromUSD(
+                                    record.amount *
+                                      (tronPartCreditShare(record) ?? 1),
+                                    {
+                                      digitsLarge: 2,
+                                      digitsSmall: 2,
+                                      abbreviate: false,
+                                    }
+                                  ),
+                                  received: formatTronUSDTAmount(
+                                    record.tron_received_usdt_micros ?? 0
+                                  ),
+                                }
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                         <div className='space-y-1'>
                           <Label className='text-muted-foreground text-xs'>
