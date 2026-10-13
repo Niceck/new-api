@@ -50,11 +50,15 @@ func TestMain(m *testing.M) {
 		&model.TronDeposit{},
 		&model.TronTopupTicket{},
 		&model.TronScanCheckpoint{},
+		&model.TronSerialLock{},
 		&model.UserSubscription{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
+	}
+	if err := model.EnsureTronSerialLock(); err != nil {
+		panic("failed to seed TRON serial lock: " + err.Error())
 	}
 
 	os.Exit(m.Run())

@@ -328,7 +328,8 @@ func TestResolveTronTicket_UsesVerifiedDepositAndCannotReuseTxid(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "verified ownership evidence"))
-	assert.Equal(t, 100+11_000_000, getUserQuotaForPaymentGuardTest(t, order.UserID))
+	// 实到是应付的 110%：多付不多给，只入账订单面值（v31 之前按比例入 11_000_000）。
+	assert.Equal(t, 100+10_000_000, getUserQuotaForPaymentGuardTest(t, order.UserID))
 
 	var resolved TronTopupTicket
 	require.NoError(t, DB.First(&resolved, ticket.ID).Error)

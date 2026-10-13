@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"time"
 
@@ -108,45 +109,8 @@ func (s *tronTopupService) scanTronWindows(ctx context.Context, progressName str
 			}
 			break
 		}
-		for _, transfer := range transfers {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if transfer.BlockTimestampMS < fromMS || transfer.BlockTimestampMS > endMS {
-				return errors.New("TRON transfer outside completed window")
-			}
-			summary.Seen++
-			record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, ObservedAtMS: s.now().UnixMilli(), SourceAddresses: transfer.SourceAddresses}
-			result, err := model.SettleTronDeposit(record, "tron-scanner")
-			if err == nil {
-				if result.Credited && !result.AlreadyProcessed {
-					summary.Credited++
-				}
-				if result.NeedsReview && !result.AlreadyProcessed {
-					summary.Review++
-				}
-				continue
-			}
-			if errors.Is(err, model.ErrTronOrderNotFound) || errors.Is(err, model.ErrTronTransferPredatesOrder) {
-				deposit, err := model.RecordUnmatchedTronDeposit(record)
-				if err != nil {
-					return err
-				}
-				if deposit.Status == model.TronDepositStatusUnmatched {
-					summary.Unmatched++
-				}
-				continue
-			}
-			if !errors.Is(err, model.ErrTronCreditReviewRequired) {
-				return err
-			}
-			review, err := model.RecordFailedTronSettlement(record)
-			if err != nil {
-				return fmt.Errorf("record TRON review: %w", err)
-			}
-			if review {
-				summary.Review++
-			}
+		if err := s.settleTronWindow(ctx, transfers, fromMS, endMS, summary); err != nil {
+			return err
 		}
 		if err := advance(endMS); err != nil {
 			return err
@@ -163,6 +127,103 @@ func (s *tronTopupService) scanTronWindows(ctx context.Context, progressName str
 		fromMS = endMS + 1
 	}
 	return nil
+}
+
+// settleTronWindow classifies the transfers of one completed window. Exact
+// matches are settled first and in a stable order, so an inexact payment is
+// never judged against an order that an exact payment of the same window is
+// about to complete, and the order the chain API returned rows in decides
+// nothing.
+func (s *tronTopupService) settleTronWindow(ctx context.Context, transfers []TronTransfer, fromMS, endMS int64, summary *TronScanSummary) error {
+	ordered := append([]TronTransfer(nil), transfers...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].BlockTimestampMS != ordered[j].BlockTimestampMS {
+			return ordered[i].BlockTimestampMS < ordered[j].BlockTimestampMS
+		}
+		return ordered[i].TxID < ordered[j].TxID
+	})
+	var inexact []model.TronTransferRecord
+	for _, transfer := range ordered {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if transfer.BlockTimestampMS < fromMS || transfer.BlockTimestampMS > endMS {
+			return errors.New("TRON transfer outside completed window")
+		}
+		summary.Seen++
+		record := model.TronTransferRecord{TxID: transfer.TxID, BlockTimestampMS: transfer.BlockTimestampMS, FromAddress: transfer.From, ToAddress: transfer.To, TokenContract: tronUSDTContract, AmountMicros: transfer.AmountMicros, ObservedAtMS: s.now().UnixMilli(), SourceAddresses: transfer.SourceAddresses}
+		deferred, err := s.settleTronExact(record, summary)
+		if err != nil {
+			return err
+		}
+		if deferred {
+			inexact = append(inexact, record)
+		}
+	}
+	for i, record := range inexact {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		peers := make([]model.TronTransferRecord, 0, len(inexact)-1)
+		peers = append(peers, inexact[:i]...)
+		peers = append(peers, inexact[i+1:]...)
+		result, err := model.SettleTronDepositTolerant(record, peers, "tron-scanner")
+		if err != nil {
+			return err
+		}
+		if result.AlreadyProcessed {
+			continue
+		}
+		switch {
+		case result.Credited:
+			summary.Credited++
+		case result.NeedsReview:
+			summary.Review++
+		case result.Unmatched:
+			summary.Unmatched++
+		}
+	}
+	return nil
+}
+
+// settleTronExact runs the exact-amount path for one transfer. It reports
+// deferred when no order has that exact amount and tolerant matching is on, so
+// the caller judges the transfer after every exact match of the window.
+func (s *tronTopupService) settleTronExact(record model.TronTransferRecord, summary *TronScanSummary) (bool, error) {
+	result, err := model.SettleTronDeposit(record, "tron-scanner")
+	if err == nil {
+		if result.Credited && !result.AlreadyProcessed {
+			summary.Credited++
+		}
+		if result.NeedsReview && !result.AlreadyProcessed {
+			summary.Review++
+		}
+		return false, nil
+	}
+	if errors.Is(err, model.ErrTronOrderNotFound) && s.config.TolerantMatchEnabled {
+		return true, nil
+	}
+	if errors.Is(err, model.ErrTronOrderNotFound) || errors.Is(err, model.ErrTronTransferPredatesOrder) {
+		deposit, err := model.RecordUnmatchedTronDeposit(record)
+		if err != nil {
+			return false, err
+		}
+		if deposit.Status == model.TronDepositStatusUnmatched {
+			summary.Unmatched++
+		}
+		return false, nil
+	}
+	if !errors.Is(err, model.ErrTronCreditReviewRequired) {
+		return false, err
+	}
+	review, err := model.RecordFailedTronSettlement(record)
+	if err != nil {
+		return false, fmt.Errorf("record TRON review: %w", err)
+	}
+	if review {
+		summary.Review++
+	}
+	return false, nil
 }
 
 func shouldStartTronScanner(isMaster bool, config TronTopupConfig) bool {

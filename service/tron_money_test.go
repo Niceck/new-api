@@ -63,33 +63,3 @@ func TestCalculateTronPayment_RejectsZeroNegativeAndQuotaOverflow(t *testing.T) 
 		})
 	}
 }
-
-func TestCalculateClaimQuota_IsProportionalAndNeverOverflows(t *testing.T) {
-	quota, err := calculateClaimQuota(10_000_000, 15_000_000, 100)
-	require.NoError(t, err)
-	assert.Equal(t, 150, quota)
-
-	quota, err = calculateClaimQuota(3, 1, 100)
-	require.NoError(t, err)
-	assert.Equal(t, 33, quota)
-
-	for _, tc := range []struct {
-		expected int64
-		actual   int64
-		quota    int
-	}{
-		{expected: 0, actual: 1, quota: 1},
-		{expected: 1, actual: 0, quota: 1},
-		{expected: 1, actual: 1, quota: 0},
-		{expected: 1, actual: int64(common.MaxQuota) + 1, quota: common.MaxQuota},
-	} {
-		_, err := calculateClaimQuota(tc.expected, tc.actual, tc.quota)
-		assert.Error(t, err)
-	}
-}
-
-func TestCalculateClaimQuota_UsesCentralQuotaConversionWithoutClamp(t *testing.T) {
-	quota, err := calculateClaimQuota(7_000_000, 7_000_000, common.MaxQuota-1)
-	require.NoError(t, err)
-	assert.Equal(t, common.MaxQuota-1, quota)
-}

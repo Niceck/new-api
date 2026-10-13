@@ -18,6 +18,9 @@ func RecordReviewTronDeposit(transfer TronTransferRecord, reason string) (TronSe
 	transfer = normalized
 	result := TronSettlementResult{}
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		var existing TronDeposit
 		err := lockForUpdate(tx).Where("tx_id = ?", transfer.TxID).First(&existing).Error
 		if err == nil {

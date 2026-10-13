@@ -39,7 +39,8 @@ func pendingOrderCount(t *testing.T, userID int) int64 {
 // 余额 522，同时冲进来 12 张 2000 的易支付订单：只能建成一张（522 + 2000 装得下，再多一张就超限）。
 func TestTopUpCapacityMySQL_ConcurrentEpayOrdersReserveOnce(t *testing.T) {
 	withEpayTestMySQL(t, func() {
-		require.NoError(t, DB.AutoMigrate(&TronTopupOrder{}))
+		require.NoError(t, DB.AutoMigrate(&TronTopupOrder{}, &TronSerialLock{}))
+		require.NoError(t, EnsureTronSerialLock())
 		const userID = 930101
 		cleanCapacityRows(t, userID)
 		t.Cleanup(func() { cleanCapacityRows(t, userID) })
@@ -82,7 +83,8 @@ func TestTopUpCapacityMySQL_ConcurrentEpayOrdersReserveOnce(t *testing.T) {
 // 易支付与 TRON 同时下单：两条路径锁的是同一行用户，合计也只能建成一张。
 func TestTopUpCapacityMySQL_ConcurrentEpayAndTronShareTheSameRoom(t *testing.T) {
 	withEpayTestMySQL(t, func() {
-		require.NoError(t, DB.AutoMigrate(&TronTopupOrder{}))
+		require.NoError(t, DB.AutoMigrate(&TronTopupOrder{}, &TronSerialLock{}))
+		require.NoError(t, EnsureTronSerialLock())
 		const userID = 930102
 		cleanCapacityRows(t, userID)
 		t.Cleanup(func() { cleanCapacityRows(t, userID) })

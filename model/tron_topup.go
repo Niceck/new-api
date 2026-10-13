@@ -9,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/bytedance/gopkg/util/gopool"
-	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -43,6 +42,12 @@ type TronDeposit struct {
 	CreditedQuota    int    `json:"credited_quota" gorm:"type:bigint"`
 	Status           string `json:"status" gorm:"type:varchar(32);index"`
 	ObservedAtMS     int64  `json:"observed_at_ms" gorm:"type:bigint"`
+	// How the deposit was attributed (exact / tolerant / manual), under which
+	// tolerant rule version, and why tolerance did not apply. Nullable so an
+	// older binary keeps working after a rollback.
+	MatchMode string `json:"match_mode,omitempty" gorm:"type:varchar(16)"`
+	MatchRule string `json:"match_rule,omitempty" gorm:"type:varchar(16)"`
+	MatchNote string `json:"match_note,omitempty" gorm:"type:varchar(64)"`
 }
 
 type TronTopupTicket struct {
@@ -92,6 +97,8 @@ type TronSettlementResult struct {
 	Credited         bool
 	NeedsReview      bool
 	AlreadyProcessed bool
+	Unmatched        bool
+	MatchNote        string
 }
 
 const (
@@ -102,6 +109,9 @@ const (
 	TronTicketReasonUserClaim    = "user_claim"
 	TronTicketReasonLatePayment  = "late_payment"
 	TronTicketReasonCreditFailed = "credit_failed"
+	// A user disputes a transaction that was already credited to someone else.
+	// It never credits anything; an administrator closes it after reviewing.
+	TronTicketReasonDispute = "dispute"
 
 	TronTicketStatusOpen     = "open"
 	TronTicketStatusResolved = "resolved"
@@ -122,6 +132,7 @@ var (
 	ErrTronTicketNotOpen         = errors.New("TRON top-up ticket is not open")
 	ErrTronClaimWindowClosed     = errors.New("TRON top-up claim window is closed")
 	ErrTronClaimLimitReached     = errors.New("TRON top-up claim limit reached")
+	ErrTronDisputeNotResolvable  = errors.New("TRON dispute tickets cannot credit an order")
 	tronModelTxIDPattern         = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 )
 
@@ -133,6 +144,9 @@ func CreateTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
 	topUpID := topUp.Id
 	orderID := order.ID
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		if err := tx.Create(topUp).Error; err != nil {
 			return err
 		}
@@ -148,6 +162,21 @@ func CreateTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
 }
 
 func CreateOrGetActiveTronTopupOrder(topUp *TopUp, order *TronTopupOrder, nowMS int64) (*TronTopupOrder, bool, error) {
+	return createOrGetActiveTronTopupOrder(topUp, order, nowMS, nil)
+}
+
+// CreateOrGetActiveTronTopupOrderAt stamps a new order with clock() read after
+// the ledger lock is held, keeping its validity period. Tolerant matching
+// trusts the creation time, so an order must never look older than the moment
+// it could first be seen, however long the request waited before this point.
+func CreateOrGetActiveTronTopupOrderAt(topUp *TopUp, order *TronTopupOrder, clock func() int64) (*TronTopupOrder, bool, error) {
+	if clock == nil {
+		return nil, false, errors.New("invalid TRON order clock")
+	}
+	return createOrGetActiveTronTopupOrder(topUp, order, clock(), clock)
+}
+
+func createOrGetActiveTronTopupOrder(topUp *TopUp, order *TronTopupOrder, nowMS int64, clock func() int64) (*TronTopupOrder, bool, error) {
 	if err := validateNewTronTopupOrder(topUp, order); err != nil {
 		return nil, false, err
 	}
@@ -157,12 +186,25 @@ func CreateOrGetActiveTronTopupOrder(topUp *TopUp, order *TronTopupOrder, nowMS 
 
 	originalTopUpID := topUp.Id
 	originalOrderID := order.ID
+	originalCreateTime, originalCreatedAtMS, originalExpiresAtMS := topUp.CreateTime, order.CreatedAtMS, order.ExpiresAtMS
 	var result *TronTopupOrder
 	created := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		user := User{}
 		if err := lockForUpdate(tx).Select("id").Where("id = ?", topUp.UserId).First(&user).Error; err != nil {
 			return err
+		}
+		if clock != nil {
+			if nowMS = clock(); nowMS <= 0 {
+				return errors.New("invalid TRON order time")
+			}
+			validityMS := order.ExpiresAtMS - order.CreatedAtMS
+			order.CreatedAtMS = nowMS
+			order.ExpiresAtMS = nowMS + validityMS
+			topUp.CreateTime = nowMS / 1000
 		}
 		active := TronTopupOrder{}
 		err := tx.Table("tron_topup_orders").
@@ -199,6 +241,7 @@ func CreateOrGetActiveTronTopupOrder(topUp *TopUp, order *TronTopupOrder, nowMS 
 		topUp.Id = originalTopUpID
 		order.ID = originalOrderID
 		order.TopUpID = 0
+		topUp.CreateTime, order.CreatedAtMS, order.ExpiresAtMS = originalCreateTime, originalCreatedAtMS, originalExpiresAtMS
 	}
 	return result, created, err
 }
@@ -309,6 +352,9 @@ func RejectTronTopupTicket(ticketID int64, resolverID int, note string, nowMS in
 		return errors.New("invalid TRON ticket rejection")
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		ticket := TronTopupTicket{}
 		if err := lockForUpdate(tx).Where("id = ?", ticketID).First(&ticket).Error; err != nil {
 			return err
@@ -387,6 +433,9 @@ func RecordFailedTronSettlement(transfer TronTransferRecord) (bool, error) {
 	transfer = normalized
 	needsReview := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		order := TronTopupOrder{}
 		if err := lockForUpdate(tx).Where("expected_amount_micros = ?", transfer.AmountMicros).First(&order).Error; err != nil {
 			return err
@@ -455,6 +504,9 @@ func SettleTronDeposit(transfer TronTransferRecord, callerIP string) (TronSettle
 	var tradeNo string
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		existing := TronDeposit{}
 		err := tx.Where("tx_id = ?", transfer.TxID).First(&existing).Error
 		if err == nil {
@@ -515,6 +567,7 @@ func SettleTronDeposit(transfer TronTransferRecord, callerIP string) (TronSettle
 			AmountMicros:     transfer.AmountMicros,
 			OrderID:          &orderID,
 			Status:           depositStatus,
+			MatchMode:        TronMatchModeExact,
 			ObservedAtMS:     transfer.ObservedAtMS,
 			SourceAddresses:  transfer.SourceAddresses,
 		}
@@ -582,7 +635,12 @@ func RecordUnmatchedTronDeposit(transfer TronTransferRecord) (*TronDeposit, erro
 		ObservedAtMS:     transfer.ObservedAtMS,
 		SourceAddresses:  transfer.SourceAddresses,
 	}
-	createErr := DB.Create(&deposit).Error
+	createErr := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
+		return tx.Create(&deposit).Error
+	})
 	if createErr == nil {
 		return &deposit, nil
 	}
@@ -610,6 +668,9 @@ func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string
 	var result TronTopupTicket
 	var claimKey string
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		order := TronTopupOrder{}
 		err := lockForUpdate(tx).Where("trade_no = ? AND user_id = ?", tradeNo, userID).First(&order).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -645,7 +706,13 @@ func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string
 		err = tx.Where("tx_id = ?", txID).First(&deposit).Error
 		if err == nil {
 			if deposit.Status == TronDepositStatusCredited {
-				return ErrTronTxAlreadyClaimed
+				dispute, err := openTronDisputeTx(tx, userID, &order, &deposit, note, nowMS)
+				if err != nil {
+					return err
+				}
+				result = *dispute
+				claimKey = dispute.ClaimKey
+				return nil
 			}
 			depositID = &deposit.ID
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -719,6 +786,9 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 	var creditedQuota int
 	var tradeNo string
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockTronSerialTx(tx); err != nil {
+			return err
+		}
 		order := TronTopupOrder{}
 		if err := lockForUpdate(tx).Where("id = ?", selectedOrderID).First(&order).Error; err != nil {
 			return err
@@ -726,6 +796,9 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 		ticket := TronTopupTicket{}
 		if err := lockForUpdate(tx).Where("id = ?", ticketID).First(&ticket).Error; err != nil {
 			return err
+		}
+		if ticket.Reason == TronTicketReasonDispute {
+			return ErrTronDisputeNotResolvable
 		}
 		if ticket.Status == TronTicketStatusResolved {
 			if ticket.TxID != transfer.TxID || ticket.ResolvedOrderID != selectedOrderID {
@@ -744,10 +817,10 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 		if err := lockForUpdate(tx).Where("id = ?", order.TopUpID).First(&topUp).Error; err != nil {
 			return err
 		}
-		if topUp.PaymentProvider != PaymentProviderTron || topUp.Status != common.TopUpStatusPending || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract || transfer.BlockTimestampMS < order.CreatedAtMS || transfer.BlockTimestampMS > order.ExpiresAtMS+TronClaimGracePeriodMS {
+		if !tronTopUpMatchesOrder(topUp, &order) || topUp.Status != common.TopUpStatusPending || transfer.ToAddress != order.ReceiveAddress || transfer.TokenContract != order.TokenContract || transfer.BlockTimestampMS < order.CreatedAtMS || transfer.BlockTimestampMS > order.ExpiresAtMS+TronClaimGracePeriodMS {
 			return ErrTronTransferMismatch
 		}
-		approvedQuota, err := calculateTronClaimQuota(order.ExpectedAmountMicros, transfer.AmountMicros, order.CreditQuota)
+		approvedQuota, err := tronSettlementQuota(order.ExpectedAmountMicros, transfer.AmountMicros, order.CreditQuota)
 		if err != nil {
 			return err
 		}
@@ -774,6 +847,7 @@ func ResolveTronTopupTicket(ticketID int64, selectedOrderID int64, transfer Tron
 			deposit.SourceAddresses = transfer.SourceAddresses
 		}
 
+		deposit.MatchMode = TronMatchModeManual
 		credited, _, err := creditTronOrderTx(tx, &topUp, &order, &deposit, approvedQuota, transfer.ObservedAtMS)
 		if err != nil {
 			return err
@@ -871,24 +945,6 @@ func normalizeTronTransferRecord(transfer TronTransferRecord) (TronTransferRecor
 
 func sameTronTransfer(deposit *TronDeposit, transfer TronTransferRecord) bool {
 	return (deposit.SourceAddresses == "" || deposit.SourceAddresses == transfer.SourceAddresses) && deposit.TxID == transfer.TxID && deposit.BlockTimestampMS == transfer.BlockTimestampMS && deposit.FromAddress == transfer.FromAddress && deposit.ToAddress == transfer.ToAddress && deposit.TokenContract == transfer.TokenContract && deposit.AmountMicros == transfer.AmountMicros
-}
-
-func calculateTronClaimQuota(expectedMicros int64, actualMicros int64, creditQuota int) (int, error) {
-	if expectedMicros <= 0 || actualMicros <= 0 || creditQuota <= 0 || creditQuota > common.MaxQuota {
-		return 0, errors.New("TRON claim amounts are out of range")
-	}
-	expected := decimal.NewFromInt(expectedMicros)
-	actual := decimal.NewFromInt(actualMicros)
-	percent := actual.Mul(decimal.NewFromInt(100)).Div(expected)
-	if percent.LessThan(decimal.NewFromInt(tronClaimMinPercent)) || percent.GreaterThan(decimal.NewFromInt(tronClaimMaxPercent)) {
-		return 0, errors.New("TRON claim amount is outside review policy")
-	}
-	quotaDecimal := actual.Mul(decimal.NewFromInt(int64(creditQuota))).Div(expected).Floor()
-	quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
-	if clamp != nil || quota <= 0 {
-		return 0, errors.New("TRON claim quota is out of range")
-	}
-	return quota, nil
 }
 
 func refreshTronQuotaCache(userID int, quotaDelta int) {

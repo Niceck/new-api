@@ -276,6 +276,7 @@ func migrateDB() error {
 		&TronDeposit{},
 		&TronTopupTicket{},
 		&TronScanCheckpoint{},
+		&TronSerialLock{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -304,6 +305,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := EnsureTronSerialLock(); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -343,6 +347,7 @@ func migrateDBFast() error {
 		{&TronDeposit{}, "TronDeposit"},
 		{&TronTopupTicket{}, "TronTopupTicket"},
 		{&TronScanCheckpoint{}, "TronScanCheckpoint"},
+		{&TronSerialLock{}, "TronSerialLock"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -389,6 +394,9 @@ func migrateDBFast() error {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := EnsureTronSerialLock(); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {

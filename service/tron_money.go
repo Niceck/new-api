@@ -56,22 +56,3 @@ func calculateTronPayment(payCNY decimal.Decimal, rateCNY decimal.Decimal, credi
 		CreditQuota:        creditQuota,
 	}, nil
 }
-
-func calculateClaimQuota(expectedMicros int64, actualMicros int64, creditQuota int) (int, error) {
-	if expectedMicros <= 0 || actualMicros <= 0 || creditQuota <= 0 || creditQuota > common.MaxQuota {
-		return 0, errors.New("claim amounts are out of range")
-	}
-
-	quotaDecimal := decimal.NewFromInt(actualMicros).
-		Mul(decimal.NewFromInt(int64(creditQuota))).
-		Div(decimal.NewFromInt(expectedMicros)).
-		Floor()
-	if !quotaDecimal.IsPositive() || quotaDecimal.GreaterThan(decimal.NewFromInt(common.MaxQuota)) {
-		return 0, errors.New("claim quota is out of range")
-	}
-	quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
-	if clamp != nil || quota <= 0 {
-		return 0, errors.New("claim quota is out of range")
-	}
-	return quota, nil
-}

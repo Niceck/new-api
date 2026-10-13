@@ -47,6 +47,10 @@ type TronTopupConfig struct {
 	// order request) that may be paid with TRON. Exchange withdrawals enforce
 	// their own minimums and fees, so sub-minimum orders are never paid.
 	MinAmount int64
+	// TolerantMatchEnabled lets the scanner settle a payment whose amount is
+	// within policy of exactly one order instead of leaving it for manual
+	// review. Off unless explicitly enabled.
+	TolerantMatchEnabled bool
 }
 
 type TronOrderView struct {
@@ -63,6 +67,16 @@ type TronOrderView struct {
 	ExpiresAtMS        int64  `json:"expires_at_ms"`
 	CreditQuota        int    `json:"credit_quota"`
 	Status             string `json:"status"`
+	// TolerantMatch tells the payer that an amount between the two bounds
+	// (inclusive) can be settled automatically for this order.
+	TolerantMatch         bool  `json:"tolerant_match"`
+	TolerantMinUSDTMicros int64 `json:"tolerant_min_usdt_micros"`
+	TolerantMaxUSDTMicros int64 `json:"tolerant_max_usdt_micros"`
+	// Set once the order is settled: what arrived, what was credited and how
+	// the payment was attributed. CreditQuota above stays the face value.
+	ReceivedUSDTMicros int64  `json:"received_usdt_micros"`
+	CreditedQuota      int    `json:"credited_quota"`
+	MatchMode          string `json:"match_mode"`
 }
 
 type TronTopupAdminStatus struct {
@@ -76,6 +90,7 @@ type TronTopupAdminStatus struct {
 	CheckpointMS              int64  `json:"checkpoint_ms"`
 	CheckpointUpdatedMS       int64  `json:"checkpoint_updated_ms"`
 	OpenTickets               int64  `json:"open_tickets"`
+	TolerantMatchEnabled      bool   `json:"tolerant_match_enabled"`
 }
 
 type tronTopupService struct {
@@ -139,9 +154,30 @@ func loadTronTopupConfig() (TronTopupConfig, error) {
 	config.InitialLookback = config.OrderTTL + config.IndexSafetyLag + config.CheckpointOverlap
 	config.ReconcileLookback = 25 * time.Hour
 	config.ReconcileInterval = time.Hour
+	tolerantMatch, err := strictTronEnvBool("TRON_TOPUP_TOLERANT_MATCH_ENABLED", false)
+	if err != nil {
+		return TronTopupConfig{}, err
+	}
 	config.MaxCNY = int64(maxCNY)
 	config.MinAmount = int64(minAmount)
+	config.TolerantMatchEnabled = tolerantMatch
 	return config, nil
+}
+
+// strictTronEnvBool accepts only the literal true or false: a switch that
+// moves money must fail startup on a typo rather than fall back silently.
+func strictTronEnvBool(name string, defaultValue bool) (bool, error) {
+	raw, exists := os.LookupEnv(name)
+	if !exists {
+		return defaultValue, nil
+	}
+	switch raw {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s must be true or false", name)
 }
 
 func strictTronEnvInt(name string, defaultValue int, minimum int, maximum int) (int, error) {
@@ -233,7 +269,7 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 		return TronOrderView{}, err
 	}
 	if active != nil {
-		return tronOrderView(active, common.TopUpStatusPending, s.config.Network), nil
+		return s.orderView(active, common.TopUpStatusPending), nil
 	}
 
 	healthy, err := s.acceptingOrders(nowMS)
@@ -279,7 +315,7 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 		payMoney, _ := payCNY.Float64()
 		topUp := &model.TopUp{UserId: userID, Amount: requestedAmount, Money: payMoney, TradeNo: tradeNo, PaymentMethod: model.PaymentMethodTron, PaymentProvider: model.PaymentProviderTron, CreateTime: now.Unix(), Status: common.TopUpStatusPending}
 		order := &model.TronTopupOrder{UserID: userID, TradeNo: tradeNo, ReceiveAddress: s.config.ReceiveAddress, TokenContract: tronUSDTContract, ExpectedAmountMicros: quote.ExpectedUSDTMicros, RateCNYMicros: quote.RateCNYMicros, QuoteUpdatedAtMS: quoteUpdatedAt.UnixMilli(), ExpiresAtMS: now.Add(s.config.OrderTTL).UnixMilli(), CreditQuota: quote.CreditQuota, CreatedAtMS: nowMS}
-		storedOrder, created, err := model.CreateOrGetActiveTronTopupOrder(topUp, order, nowMS)
+		storedOrder, created, err := model.CreateOrGetActiveTronTopupOrderAt(topUp, order, func() int64 { return s.now().UnixMilli() })
 		if err != nil {
 			collision, collisionErr := model.TronExpectedAmountExists(quote.ExpectedUSDTMicros)
 			if collisionErr == nil && collision {
@@ -288,11 +324,22 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 			return TronOrderView{}, err
 		}
 		if !created {
-			return tronOrderView(storedOrder, common.TopUpStatusPending, s.config.Network), nil
+			return s.orderView(storedOrder, common.TopUpStatusPending), nil
 		}
-		return tronOrderView(storedOrder, topUp.Status, s.config.Network), nil
+		return s.orderView(storedOrder, topUp.Status), nil
 	}
 	return TronOrderView{}, errors.New("no unique TRON payment amount is available")
+}
+
+// orderView adds what this deployment does with inexact amounts to the plain
+// order view, so the payment dialog states the real rule instead of guessing.
+func (s *tronTopupService) orderView(order *model.TronTopupOrder, status string) TronOrderView {
+	view := tronOrderView(order, status, s.config.Network)
+	if s.config.TolerantMatchEnabled {
+		view.TolerantMatch = true
+		view.TolerantMinUSDTMicros, view.TolerantMaxUSDTMicros = model.TronTolerantAmountRange(order.ExpectedAmountMicros)
+	}
+	return view
 }
 
 func tronOrderView(order *model.TronTopupOrder, status string, network string) TronOrderView {
@@ -335,13 +382,24 @@ func (s *tronTopupService) GetOrder(userID int, tradeNo string) (TronOrderView, 
 	if status == common.TopUpStatusPending && s.now().UnixMilli() > order.ExpiresAtMS {
 		status = common.TopUpStatusExpired
 	}
-	view := tronOrderView(order, status, s.config.Network)
+	view := s.orderView(order, status)
 	view.CanClaim = topUp.Status == common.TopUpStatusPending && s.now().UnixMilli() <= view.ClaimDeadlineMS
 	var ticket model.TronTopupTicket
 	if err := model.DB.Where("order_id = ?", order.ID).Order("id DESC").Limit(1).Find(&ticket).Error; err != nil {
 		return TronOrderView{}, err
 	}
 	view.ReviewStatus = ticket.Status
+	if topUp.Status == common.TopUpStatusSuccess {
+		settlement, err := model.GetTronOrderSettlement(order.ID)
+		if err != nil {
+			return TronOrderView{}, err
+		}
+		if settlement != nil {
+			view.ReceivedUSDTMicros = settlement.ReceivedMicros
+			view.CreditedQuota = settlement.CreditedQuota
+			view.MatchMode = settlement.MatchMode
+		}
+	}
 	return view, nil
 }
 
@@ -413,7 +471,7 @@ func (s *tronTopupService) AdminStatus() (TronTopupAdminStatus, error) {
 	if err != nil {
 		return TronTopupAdminStatus{}, err
 	}
-	status := TronTopupAdminStatus{TronDepositSummary: summary, AcceptingOrders: accepting, Enabled: s.config.Enabled, Network: s.config.Network, ReceiveAddress: s.config.ReceiveAddress, OpenTickets: openTickets}
+	status := TronTopupAdminStatus{TronDepositSummary: summary, AcceptingOrders: accepting, Enabled: s.config.Enabled, Network: s.config.Network, ReceiveAddress: s.config.ReceiveAddress, OpenTickets: openTickets, TolerantMatchEnabled: s.config.TolerantMatchEnabled}
 	if checkpoint != nil {
 		status.CheckpointMS = checkpoint.LastScannedMS
 		status.CheckpointUpdatedMS = checkpoint.UpdatedAtMS

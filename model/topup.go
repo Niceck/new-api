@@ -24,6 +24,12 @@ type TopUp struct {
 	CreateTime      int64   `json:"create_time"`
 	CompleteTime    int64   `json:"complete_time"`
 	Status          string  `json:"status"`
+	// Set on read for settled TRON top-ups only, never stored: the USDT that
+	// arrived, the quota actually credited and the order's face quota. Amount
+	// and Money above stay the order's quoted values.
+	TronReceivedMicros int64 `json:"tron_received_usdt_micros,omitempty" gorm:"-"`
+	TronCreditedQuota  int   `json:"tron_credited_quota,omitempty" gorm:"-"`
+	TronFaceQuota      int   `json:"tron_face_quota,omitempty" gorm:"-"`
 }
 
 const (
@@ -226,6 +232,10 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 		return nil, 0, err
 	}
 
+	topups, err = attachTronSettlements(topups)
+	if err != nil {
+		return nil, 0, err
+	}
 	return topups, total, nil
 }
 
@@ -255,6 +265,10 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 		return nil, 0, err
 	}
 
+	topups, err = attachTronSettlements(topups)
+	if err != nil {
+		return nil, 0, err
+	}
 	return topups, total, nil
 }
 
@@ -299,6 +313,10 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
+	topups, err = attachTronSettlements(topups)
+	if err != nil {
+		return nil, 0, err
+	}
 	return topups, total, nil
 }
 
@@ -337,6 +355,10 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 	}
 
 	if err = tx.Commit().Error; err != nil {
+		return nil, 0, err
+	}
+	topups, err = attachTronSettlements(topups)
+	if err != nil {
 		return nil, 0, err
 	}
 	return topups, total, nil

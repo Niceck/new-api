@@ -271,6 +271,13 @@ func TestGetTopUpInfo_AdvertisesTronWithoutAddingLegacyEpayMethod(t *testing.T) 
 	}
 	recorder = tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
 	assert.Contains(t, recorder.Body.String(), `"tron_min_topup":100`)
+	assert.Contains(t, recorder.Body.String(), `"tron_tolerant_match":false`)
+
+	getTronPublicConfig = func() (service.TronTopupConfig, bool) {
+		return service.TronTopupConfig{Enabled: true, Network: "mainnet", ReceiveAddress: "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f", MinAmount: 100, TolerantMatchEnabled: true}, true
+	}
+	recorder = tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
+	assert.Contains(t, recorder.Body.String(), `"tron_tolerant_match":true`)
 
 	isTopupComplianceConfirmed = func() bool { return false }
 	recorder = tronHandlerResponse(t, http.MethodGet, "/", "", 1, GetTopUpInfo)
