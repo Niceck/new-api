@@ -192,3 +192,104 @@ func TestTronSettlementView_ReportsWhatActuallyArrivedAndWasCredited(t *testing.
 	assert.Zero(t, unpaid.TronReceivedMicros)
 	assert.Zero(t, unpaid.TronCreditedQuota)
 }
+
+// 用户 B 的订单：过期超过 2 小时（不阻断别人的容差入账），但仍在 24 小时申诉期内。
+func tolLateOrderB(t *testing.T, tradeNo string, userID int) *TronTopupOrder {
+	t.Helper()
+	return tolOrder(t, tradeNo, userID, 14_951_184, tolBaseMS-tolTTLMS-tronTolerantBlockerGraceMS-60_000, tolFaceQuota)
+}
+
+func TestTronDispute_EarlierRejectedClaimDoesNotSwallowIt(t *testing.T) {
+	truncateTables(t)
+	orderB := tolLateOrderB(t, "DSP-old-claim-B", 9241)
+	transfer := tolTransfer(240, tolPaidMicros, tolBaseMS+113_000)
+	// B 在扫描器看到这笔款之前就申诉过，被驳回；随后这笔款被容差入账给了 A。
+	oldClaim, err := submitTronTopupClaimAt(9241, orderB.TradeNo, transfer.TxID, "mine", tolBaseMS+120_000)
+	require.NoError(t, err)
+	require.NoError(t, RejectTronTopupTicket(oldClaim.ID, 1, "证据不足", tolBaseMS+130_000))
+	tolOrder(t, "DSP-old-claim-A", 9240, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	settled, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+	require.NoError(t, err)
+	require.True(t, settled.Credited)
+
+	// B 用同一张订单、同一个 txid 再来：必须是一张新的 open 争议工单，不能把旧的驳回工单原样还给他。
+	dispute, err := submitTronTopupClaimAt(9241, orderB.TradeNo, transfer.TxID, "it went to someone else", tolBaseMS+30*60*1000)
+	require.NoError(t, err)
+	assert.NotEqual(t, oldClaim.ID, dispute.ID)
+	assert.Equal(t, TronTicketReasonDispute, dispute.Reason)
+	assert.Equal(t, TronTicketStatusOpen, dispute.Status)
+	assert.Equal(t, tolFaceQuota, tolQuota(t, 9240))
+	assert.Zero(t, tolQuota(t, 9241))
+
+	var old TronTopupTicket
+	require.NoError(t, DB.First(&old, oldClaim.ID).Error)
+	assert.Equal(t, TronTicketStatusRejected, old.Status, "旧工单的历史不被改写")
+	assert.Equal(t, "证据不足", old.AdminNote)
+}
+
+func TestTronDispute_OpensAfterAdminCreditedTheClaimToAnotherUsersOrder(t *testing.T) {
+	truncateTables(t)
+	orderA := tolOrder(t, "DSP-admin-A", 9250, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	orderB := tolLateOrderB(t, "DSP-admin-B", 9251)
+	transfer := tolTransfer(250, tolPaidMicros, tolBaseMS+tolTTLMS+60_000)
+	_, err := RecordUnmatchedTronDeposit(transfer)
+	require.NoError(t, err)
+	// B 提交申诉；管理员核实后认定这笔钱是 A 的，用 B 的工单选了 A 的订单入账（项目支持的流程）。
+	claim, err := submitTronTopupClaimAt(9251, orderB.TradeNo, transfer.TxID, "mine", tolBaseMS+tolTTLMS+120_000)
+	require.NoError(t, err)
+	require.NoError(t, ResolveTronTopupTicket(claim.ID, orderA.ID, transfer, 1, "evidence points to A"))
+	require.Equal(t, tolFaceQuota, tolQuota(t, 9250))
+
+	dispute, err := submitTronTopupClaimAt(9251, orderB.TradeNo, transfer.TxID, "I disagree", tolBaseMS+tolTTLMS+300_000)
+	require.NoError(t, err)
+	assert.NotEqual(t, claim.ID, dispute.ID)
+	assert.Equal(t, TronTicketReasonDispute, dispute.Reason)
+	assert.Equal(t, TronTicketStatusOpen, dispute.Status)
+	assert.Zero(t, dispute.CreditedUserID)
+	assert.Zero(t, dispute.ResolvedOrderID)
+	assert.Empty(t, dispute.AdminNote)
+	assert.Zero(t, tolQuota(t, 9251))
+}
+
+func TestTronDispute_ExistingDisputeIsReturnedAfterTheWindowButNoNewOneOpens(t *testing.T) {
+	truncateTables(t)
+	_, transfer := tolCreditedToUserA(t)
+	orderB := tolLateOrderB(t, "DSP-window-B", 9261)
+	orderC := tolOrder(t, "DSP-window-C", 9262, 14_951_185, tolBaseMS-tolTTLMS-tronTolerantBlockerGraceMS-60_000, tolFaceQuota)
+	first, err := submitTronTopupClaimAt(9261, orderB.TradeNo, transfer.TxID, "mine", tolBaseMS+30*60*1000)
+	require.NoError(t, err)
+
+	afterWindow := orderB.ExpiresAtMS + TronClaimGracePeriodMS + 1
+	again, err := submitTronTopupClaimAt(9261, orderB.TradeNo, transfer.TxID, "any news?", afterWindow)
+	require.NoError(t, err, "已有的争议在申诉期过后仍能查到")
+	assert.Equal(t, first.ID, again.ID)
+
+	_, err = submitTronTopupClaimAt(9262, orderC.TradeNo, transfer.TxID, "mine too", afterWindow)
+	require.ErrorIs(t, err, ErrTronClaimWindowClosed, "申诉期过后不能新开争议")
+	var disputes int64
+	require.NoError(t, DB.Model(&TronTopupTicket{}).Where("reason = ?", TronTicketReasonDispute).Count(&disputes).Error)
+	assert.Equal(t, int64(1), disputes)
+}
+
+func TestSubmitTronClaim_SameUserStillGetsTheirEarlierClaimBack(t *testing.T) {
+	truncateTables(t)
+	// 同一个用户两张单：在旧单上申诉，管理员把款入到了他的新单。他在旧单上重复提交，
+	// 拿回的是原来那张工单（幂等），而不是一张针对自己的「争议」或一个报错。
+	oldOrder := tolOrder(t, "DSP-self-old", 9270, 14_951_723, tolBaseMS-21*60*1000, tolFaceQuota)
+	newOrder := tolOrder(t, "DSP-self-new", 9270, tolExpectedMicros, tolBaseMS, 55_000_000)
+	transfer := tolTransfer(270, tolPaidMicros, tolBaseMS+30_000)
+	result, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+	require.NoError(t, err)
+	require.True(t, result.Unmatched)
+	claim, err := submitTronTopupClaimAt(9270, oldOrder.TradeNo, transfer.TxID, "mine", tolBaseMS+200_000)
+	require.NoError(t, err)
+	require.NoError(t, ResolveTronTopupTicket(claim.ID, newOrder.ID, transfer, 1, "belongs to the newer order"))
+
+	again, err := submitTronTopupClaimAt(9270, oldOrder.TradeNo, transfer.TxID, "retry", tolBaseMS+400_000)
+	require.NoError(t, err)
+	assert.Equal(t, claim.ID, again.ID)
+	assert.Equal(t, TronTicketStatusResolved, again.Status)
+	var disputes int64
+	require.NoError(t, DB.Model(&TronTopupTicket{}).Where("reason = ?", TronTicketReasonDispute).Count(&disputes).Error)
+	assert.Zero(t, disputes)
+}

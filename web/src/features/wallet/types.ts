@@ -88,11 +88,11 @@ export interface TronTopupOrder {
 
 export interface TronTopupTicket {
   id: number
-  user_id?: number
-  order_id?: number
   tx_id?: string
   reason?: string
   status?: 'open' | 'resolved' | 'rejected'
+  created_at_ms?: number
+  updated_at_ms?: number
 }
 
 export type TronTopupOrderResponse = ApiResponse<TronTopupOrder>

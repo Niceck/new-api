@@ -30,7 +30,7 @@ export function TronToleranceRules(props: { order: TronTopupOrder }) {
     <ul className='text-muted-foreground mt-2 list-disc space-y-1 pl-4 text-xs leading-5'>
       <li>
         {t(
-          'Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT',
+          'An amount that is not exact but between {{min}} and {{max}} USDT is credited automatically only if it arrives at least 60 seconds after this order was created, before the countdown ends, and matches this order alone',
           {
             min: formatTronUSDTAmount(
               props.order.tolerant_min_usdt_micros ?? 0
@@ -49,7 +49,7 @@ export function TronToleranceRules(props: { order: TronTopupOrder }) {
       </li>
       <li>
         {t(
-          'Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review'
+          'Anything else is reviewed manually, as are orders created after several others within 24 hours — submit a claim with the transaction ID'
         )}
       </li>
     </ul>
@@ -61,12 +61,27 @@ export function TronSettlementSummary(props: { order: TronTopupOrder }) {
   const { t } = useTranslation()
   const received = props.order.received_usdt_micros ?? 0
   const expected = props.order.expected_usdt_micros
+  const credited = props.order.credited_quota ?? 0
+  const face = props.order.credit_quota
   if (
     props.order.status !== 'success' ||
     received <= 0 ||
-    received === expected
+    (received === expected && credited === face)
   ) {
     return null
+  }
+  // The note follows what was actually credited, not today's rules: an order
+  // settled before overpayments were capped may show more than its face value,
+  // and then only the facts are shown.
+  let note: string | null = null
+  if (credited > 0 && credited < face) {
+    note = t(
+      'Paid less than the amount due, so it was credited in proportion and this order is settled'
+    )
+  } else if (credited === face && received > expected) {
+    note = t(
+      'Paid more than the amount due, so the face value of the order was credited'
+    )
   }
   return (
     <div className='rounded-lg border p-3 text-sm'>
@@ -84,19 +99,13 @@ export function TronSettlementSummary(props: { order: TronTopupOrder }) {
             {t('Amount credited')}
           </dt>
           <dd className='mt-1 font-medium tabular-nums'>
-            {formatQuotaWithCurrency(props.order.credited_quota ?? 0)}
+            {formatQuotaWithCurrency(credited)}
           </dd>
         </div>
       </dl>
-      <p className='text-muted-foreground mt-2 text-xs leading-5'>
-        {received < expected
-          ? t(
-              'Paid less than the amount due, so it was credited in proportion and this order is settled'
-            )
-          : t(
-              'Paid more than the amount due, so the face value of the order was credited'
-            )}
-      </p>
+      {note ? (
+        <p className='text-muted-foreground mt-2 text-xs leading-5'>{note}</p>
+      ) : null}
     </div>
   )
 }

@@ -366,10 +366,10 @@ describe('TronPaymentDialog', () => {
   const newWording = [
     'Send at least the amount due before the countdown ends',
     'Amount due',
-    'Credited automatically when the amount that arrives is between {{min}} and {{max}} USDT',
+    'An amount that is not exact but between {{min}} and {{max}} USDT is credited automatically only if it arrives at least 60 seconds after this order was created, before the countdown ends, and matches this order alone',
     'Paying more adds no credit and is not refunded',
     'Paying less is credited in proportion and settles this order — create a new order to top up the difference',
-    'Outside that range, after the deadline, or when the payment cannot be attributed, submit a claim for manual review',
+    'Anything else is reviewed manually, as are orders created after several others within 24 hours — submit a claim with the transaction ID',
     'Amount received',
     'Amount credited',
     'Paid less than the amount due, so it was credited in proportion and this order is settled',
@@ -390,10 +390,10 @@ describe('TronPaymentDialog', () => {
     for (const expected of [
       'Send at least the amount due before the countdown ends',
       'Amount due',
-      'Credited automatically when the amount that arrives is between 12.412111 and 15.170357 USDT',
+      'An amount that is not exact but between 12.412111 and 15.170357 USDT is credited automatically only if it arrives at least 60 seconds after this order was created, before the countdown ends, and matches this order alone',
       'Paying more adds no credit and is not refunded',
       'Paying less is credited in proportion and settles this order',
-      'submit a claim for manual review',
+      'as are orders created after several others within 24 hours — submit a claim with the transaction ID',
     ]) {
       assert.equal(bodyText.includes(expected), true, expected)
     }
@@ -420,7 +420,7 @@ describe('TronPaymentDialog', () => {
       bodyText.includes('Paying more adds no credit and is not refunded'),
       false
     )
-    assert.equal(bodyText.includes('Credited automatically'), false)
+    assert.equal(bodyText.includes('is credited automatically'), false)
   })
 
   test('shows what arrived and what was credited for an underpaid order', async () => {
@@ -472,6 +472,21 @@ describe('TronPaymentDialog', () => {
     assert.equal(bodyText.includes('Amount received'), false)
     assert.equal(bodyText.includes('Paid less than the amount due'), false)
     assert.equal(bodyText.includes('Paid more than the amount due'), false)
+  })
+
+  test('an order credited above its face value before the cap shows facts without a rule', async () => {
+    // v30 的人工通过会按比例多给：这类历史订单不能被解释成「按面值入账」。
+    const bodyText = await bodyTextFor({
+      ...tolerantOrder,
+      status: 'success',
+      received_usdt_micros: 15_170_000,
+      credited_quota: 55_000_000,
+      match_mode: '',
+    })
+    assert.equal(bodyText.includes('Amount received'), true)
+    assert.equal(bodyText.includes('Amount credited'), true)
+    assert.equal(bodyText.includes('Paid more than the amount due'), false)
+    assert.equal(bodyText.includes('Paid less than the amount due'), false)
   })
 
   test('every locale carries the new wording under keys without periods', async () => {

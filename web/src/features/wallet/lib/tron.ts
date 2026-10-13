@@ -59,20 +59,26 @@ export function formatTronCNYValue(
 }
 
 /**
- * For a settled TRON top-up that was paid short, the share of the face value
- * that was actually credited (between 0 and 1). Null when the record is not a
- * part-credited TRON top-up, so callers show nothing extra.
+ * For a settled TRON top-up, the amount actually credited, in the same unit
+ * as the record's face amount. Null when the record carries no settlement
+ * facts (not TRON, or not settled), so callers show nothing extra.
  */
-export function tronPartCreditShare(record: {
+export function tronCreditedAmount(record: {
+  amount: number
+  tron_received_usdt_micros?: number
   tron_credited_quota?: number
   tron_face_quota?: number
 }): number | null {
   const credited = record.tron_credited_quota ?? 0
   const face = record.tron_face_quota ?? 0
-  if (credited <= 0 || face <= 0 || credited >= face) {
+  if (
+    credited <= 0 ||
+    face <= 0 ||
+    (record.tron_received_usdt_micros ?? 0) <= 0
+  ) {
     return null
   }
-  return credited / face
+  return (record.amount * credited) / face
 }
 
 /** Whether a TRON order advertises an automatic range for inexact amounts. */

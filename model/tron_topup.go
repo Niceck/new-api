@@ -687,6 +687,29 @@ func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string
 			return ErrTopUpStatusInvalid
 		}
 
+		var depositID *int64
+		deposit := TronDeposit{}
+		err = tx.Where("tx_id = ?", txID).First(&deposit).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		depositFound := err == nil
+		// A transaction that is already credited can only be disputed. This is
+		// decided before the idempotent lookup below: an earlier claim on the
+		// same order, long since rejected or resolved toward someone else, must
+		// not be handed back in place of the dispute.
+		if depositFound && deposit.Status == TronDepositStatusCredited {
+			dispute, err := openTronDisputeTx(tx, userID, &order, &deposit, note, nowMS)
+			if err == nil {
+				result = *dispute
+				claimKey = dispute.ClaimKey
+				return nil
+			}
+			if !errors.Is(err, ErrTronTxAlreadyClaimed) {
+				return err
+			}
+		}
+
 		claimKey = fmt.Sprintf("claim:%d:%d:%s", userID, order.ID, txID)
 		existingTicket := TronTopupTicket{}
 		err = tx.Where("claim_key = ?", claimKey).First(&existingTicket).Error
@@ -697,26 +720,14 @@ func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		if depositFound && deposit.Status == TronDepositStatusCredited {
+			return ErrTronTxAlreadyClaimed
+		}
 		if nowMS > order.ExpiresAtMS && nowMS-order.ExpiresAtMS > TronClaimGracePeriodMS {
 			return ErrTronClaimWindowClosed
 		}
-
-		var depositID *int64
-		deposit := TronDeposit{}
-		err = tx.Where("tx_id = ?", txID).First(&deposit).Error
-		if err == nil {
-			if deposit.Status == TronDepositStatusCredited {
-				dispute, err := openTronDisputeTx(tx, userID, &order, &deposit, note, nowMS)
-				if err != nil {
-					return err
-				}
-				result = *dispute
-				claimKey = dispute.ClaimKey
-				return nil
-			}
+		if depositFound {
 			depositID = &deposit.ID
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
 		}
 
 		var claimCount int64

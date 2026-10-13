@@ -1,12 +1,14 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 const (
@@ -519,4 +521,160 @@ func TestTronSerialLock_EveryLedgerWriteTakesItFirst(t *testing.T) {
 	require.NoError(t, DB.Model(&TronTopupOrder{}).Count(&orders).Error)
 	assert.Zero(t, deposits)
 	assert.EqualValues(t, 1, orders)
+}
+
+// failTronWrites makes every create or update of one table fail until the
+// returned function is called, to prove a settlement is all-or-nothing.
+func failTronWrites(t *testing.T, operation string, table string) func() {
+	t.Helper()
+	name := "tol_fail_" + operation + "_" + table
+	hook := func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == table {
+			_ = tx.AddError(errors.New("injected " + operation + " failure on " + table))
+		}
+	}
+	remove := func() {}
+	switch operation {
+	case "create":
+		require.NoError(t, DB.Callback().Create().Before("gorm:create").Register(name, hook))
+		remove = func() { _ = DB.Callback().Create().Remove(name) }
+	case "update":
+		require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(name, hook))
+		remove = func() { _ = DB.Callback().Update().Remove(name) }
+	default:
+		t.Fatalf("unknown operation %q", operation)
+	}
+	t.Cleanup(remove)
+	return remove
+}
+
+func TestTolerantSettle_AnyFailedWriteRollsEverythingBackAndRetryCreditsOnce(t *testing.T) {
+	steps := []struct{ operation, table string }{
+		{"create", "tron_deposits"},
+		{"update", "users"},
+		{"update", "top_ups"},
+		{"update", "tron_topup_orders"},
+		{"update", "tron_deposits"},
+	}
+	for i, step := range steps {
+		t.Run(step.operation+" "+step.table, func(t *testing.T) {
+			truncateTables(t)
+			truncateTablesNow(t)
+			userID := 9300 + i
+			order := tolOrder(t, fmt.Sprintf("TOL-fault-%d", i), userID, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+			transfer := tolTransfer(300+i, tolPaidMicros, tolBaseMS+113_000)
+
+			restore := failTronWrites(t, step.operation, step.table)
+			_, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+			require.Error(t, err, "写入失败必须报错，让扫描窗口不推进")
+			assert.Zero(t, tolQuota(t, userID), "不得留下加了一半的余额")
+			assert.Equal(t, common.TopUpStatusPending, tolTopUpStatus(t, order))
+			var deposits, tickets int64
+			require.NoError(t, DB.Model(&TronDeposit{}).Count(&deposits).Error)
+			require.NoError(t, DB.Model(&TronTopupTicket{}).Count(&tickets).Error)
+			assert.Zero(t, deposits, "失败不落收款记录，重扫时重新判定")
+			assert.Zero(t, tickets)
+			var stored TronTopupOrder
+			require.NoError(t, DB.Where("id = ?", order.ID).First(&stored).Error)
+			assert.Zero(t, stored.CompletedAtMS)
+
+			restore()
+			result, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+			require.NoError(t, err)
+			assert.True(t, result.Credited)
+			assert.Equal(t, tolFaceQuota, tolQuota(t, userID), "重试只入账一次")
+		})
+	}
+}
+
+func TestTolerantSettle_FailedReviewTicketDoesNotLeaveFundsWithoutATicket(t *testing.T) {
+	truncateTables(t)
+	tolUser(t, 9310, common.MaxQuota-10)
+	order := tolOrder(t, "TOL-fault-ticket", 9310, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	transfer := tolTransfer(310, tolPaidMicros, tolBaseMS+113_000)
+
+	restore := failTronWrites(t, "create", "tron_topup_tickets")
+	_, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+	require.Error(t, err)
+	var deposits int64
+	require.NoError(t, DB.Model(&TronDeposit{}).Count(&deposits).Error)
+	assert.Zero(t, deposits, "工单没建成就不能留下一笔没人跟进的待复核款")
+
+	restore()
+	result, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.NeedsReview)
+	assert.Equal(t, order.ID, result.OrderID)
+	assert.Equal(t, common.MaxQuota-10, tolQuota(t, 9310))
+}
+
+func TestTolerantSettle_WalletCapIsCheckedAgainstTheAmountActuallyCredited(t *testing.T) {
+	truncateTables(t)
+	// 恰好装满：允许。
+	tolUser(t, 9320, common.MaxQuota-tolFaceQuota)
+	tolOrder(t, "TOL-cap-exact", 9320, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	result, err := SettleTronDepositTolerant(tolTransfer(320, tolPaidMicros, tolBaseMS+113_000), nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.Credited)
+	assert.Equal(t, common.MaxQuota, tolQuota(t, 9320))
+
+	truncateTablesNow(t)
+	// 多出一个单位：留单。
+	tolUser(t, 9321, common.MaxQuota-tolFaceQuota+1)
+	tolOrder(t, "TOL-cap-over", 9321, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	result, err = SettleTronDepositTolerant(tolTransfer(321, tolPaidMicros, tolBaseMS+113_000), nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.NeedsReview)
+	assert.Equal(t, common.MaxQuota-tolFaceQuota+1, tolQuota(t, 9321))
+
+	truncateTablesNow(t)
+	// 面值装不下、但少付后的实际入账额度装得下：按实际额度入账，不因面值被拒。
+	tolUser(t, 9322, common.MaxQuota-47_000_000)
+	tolOrder(t, "TOL-cap-under", 9322, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	result, err = SettleTronDepositTolerant(tolTransfer(322, 13_952_525, tolBaseMS+113_000), nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.Credited)
+	assert.Equal(t, common.MaxQuota-47_000_000+46_656_083, tolQuota(t, 9322))
+}
+
+func TestTolerantSettle_LatePaymentHeldForAnOlderOrderDoesNotBlockTheNewOne(t *testing.T) {
+	truncateTables(t)
+	// 同一用户：旧单过期后才收到一笔精确金额的款（按精确规则归到旧单、待人工）。
+	// 这笔已有归属的待复核款不应把他新单的容差入账永远挡住。
+	oldOrder := tolOrder(t, "TOL-late-old", 9330, 14_951_723, tolBaseMS-30*60*1000, tolFaceQuota)
+	late, err := SettleTronDeposit(tolTransfer(330, 14_951_723, tolBaseMS+30_000), "tron-scanner")
+	require.NoError(t, err)
+	require.True(t, late.NeedsReview)
+	require.Equal(t, oldOrder.ID, late.OrderID)
+
+	newOrder := tolOrder(t, "TOL-late-new", 9330, tolExpectedMicros, tolBaseMS, tolFaceQuota)
+	result, err := SettleTronDepositTolerant(tolTransfer(331, tolPaidMicros, tolBaseMS+113_000), nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.Credited)
+	assert.Equal(t, newOrder.ID, result.OrderID)
+	assert.Equal(t, tolFaceQuota, tolQuota(t, 9330), "只有新单这一笔入账；旧单那笔仍待人工")
+}
+
+func TestCreateOrGetActiveTronTopupOrderAt_FailedInsertRestoresTheDraftAndLeavesNoHalfOrder(t *testing.T) {
+	truncateTables(t)
+	tolOrder(t, "CLK-taken", 9340, tolExpectedMicros, tolBaseMS-2*tolTTLMS, tolFaceQuota)
+	provisional := tolBaseMS
+	topUp := &TopUp{UserId: 9340, Amount: 100, Money: 100, TradeNo: "CLK-collide", PaymentMethod: PaymentMethodTron, PaymentProvider: PaymentProviderTron, CreateTime: provisional / 1000, Status: common.TopUpStatusPending}
+	// 应付金额与已有订单相同：订单行插入会撞唯一索引，而充值单行此时已经插入。
+	draft := &TronTopupOrder{UserID: 9340, TradeNo: "CLK-collide", ReceiveAddress: testTronReceiveAddress, TokenContract: testTronUSDTContract, ExpectedAmountMicros: tolExpectedMicros, RateCNYMicros: 6_687_834, QuoteUpdatedAtMS: provisional, ExpiresAtMS: provisional + tolTTLMS, CreditQuota: tolFaceQuota, CreatedAtMS: provisional}
+
+	_, created, err := CreateOrGetActiveTronTopupOrderAt(topUp, draft, func() int64 { return provisional + 45_000 })
+	require.Error(t, err)
+	assert.False(t, created)
+	assert.Zero(t, topUp.Id)
+	assert.Zero(t, draft.ID)
+	assert.Zero(t, draft.TopUpID)
+	assert.Equal(t, provisional, draft.CreatedAtMS)
+	assert.Equal(t, provisional+tolTTLMS, draft.ExpiresAtMS)
+	assert.Equal(t, provisional/1000, topUp.CreateTime)
+	var topUps, orders int64
+	require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", "CLK-collide").Count(&topUps).Error)
+	require.NoError(t, DB.Model(&TronTopupOrder{}).Where("trade_no = ?", "CLK-collide").Count(&orders).Error)
+	assert.Zero(t, topUps, "充值单行随事务回滚，不留半张订单")
+	assert.Zero(t, orders)
 }

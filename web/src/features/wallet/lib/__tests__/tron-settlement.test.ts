@@ -19,34 +19,45 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { hasTronTolerance, tronPartCreditShare } from '../tron'
+import { hasTronTolerance, tronCreditedAmount } from '../tron'
 
-describe('tronPartCreditShare', () => {
-  test('returns the credited share for a top-up that was paid short', () => {
+describe('tronCreditedAmount', () => {
+  test('scales the face amount by what was actually credited', () => {
     assert.equal(
-      tronPartCreditShare({
+      tronCreditedAmount({
+        amount: 100,
+        tron_received_usdt_micros: 13_952_525,
         tron_credited_quota: 46_656_083,
         tron_face_quota: 50_000_000,
       }),
-      46_656_083 / 50_000_000
+      (100 * 46_656_083) / 50_000_000
     )
   })
 
-  test('returns null when the full face value was credited', () => {
+  test('returns the face amount when the full face value was credited', () => {
     assert.equal(
-      tronPartCreditShare({
+      tronCreditedAmount({
+        amount: 100,
+        tron_received_usdt_micros: 15_018_578,
         tron_credited_quota: 50_000_000,
         tron_face_quota: 50_000_000,
       }),
-      null
+      100
     )
   })
 
   test('returns null for records without TRON settlement facts', () => {
-    assert.equal(tronPartCreditShare({}), null)
-    assert.equal(tronPartCreditShare({ tron_credited_quota: 1 }), null)
+    assert.equal(tronCreditedAmount({ amount: 100 }), null)
     assert.equal(
-      tronPartCreditShare({ tron_credited_quota: 0, tron_face_quota: 5 }),
+      tronCreditedAmount({ amount: 100, tron_credited_quota: 1 }),
+      null
+    )
+    assert.equal(
+      tronCreditedAmount({
+        amount: 100,
+        tron_credited_quota: 5,
+        tron_face_quota: 5,
+      }),
       null
     )
   })

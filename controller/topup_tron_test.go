@@ -307,3 +307,31 @@ func TestSubscriptionRequestEpay_RejectsTronBeforePlanLookup(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "页面已更新，请刷新后重新发起 TRON 充值", response.Message)
 }
+
+func TestSubmitTronTopupClaim_ReturnsOnlyWhatTheClaimantMaySee(t *testing.T) {
+	// 管理员可能把这张工单入到别的用户的订单上；申诉人重复提交时拿回的是同一张工单，
+	// 响应里不能带出入账账户、对方订单、处理人和管理员内部备注。
+	depositID := int64(31)
+	operations := &stubTronTopupOperations{claimTicket: &model.TronTopupTicket{
+		ID: 12, UserID: 42, OrderID: 7, DepositID: &depositID, TxID: strings.Repeat("a", 64),
+		Reason: model.TronTicketReasonUserClaim, Status: model.TronTicketStatusResolved,
+		UserNote: "paid via on-ramp", AdminNote: "internal: belongs to user 77",
+		ResolverID: 1, ResolvedOrderID: 99, CreditedUserID: 77,
+		CreatedAtMS: 1_800_000_000_000, UpdatedAtMS: 1_800_000_100_000, ResolvedAtMS: 1_800_000_100_000,
+	}}
+	withTronControllerDependencies(t, operations)
+
+	body := `{"trade_no":"TRON-order-1","tx_id":"` + strings.Repeat("a", 64) + `","note":"paid via on-ramp"}`
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", body, 42, SubmitTronTopupClaim)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	response := recorder.Body.String()
+	assert.Contains(t, response, `"success":true`)
+	assert.Contains(t, response, `"id":12`)
+	assert.Contains(t, response, `"status":"resolved"`)
+	assert.Contains(t, response, `"reason":"user_claim"`)
+	assert.Contains(t, response, `"tx_id":"`+strings.Repeat("a", 64)+`"`)
+	for _, leaked := range []string{"credited_user_id", "resolved_order_id", "resolver_id", "admin_note", "internal", "77", "99", "deposit_id", "user_id", "order_id"} {
+		assert.NotContains(t, response, leaked, "申诉响应不得包含 %s", leaked)
+	}
+}

@@ -42,6 +42,11 @@ func openTronDisputeTx(tx *gorm.DB, userID int, order *TronTopupOrder, deposit *
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
+	// An existing dispute stays readable after the claim window; only opening
+	// a new one is limited to it.
+	if nowMS > order.ExpiresAtMS && nowMS-order.ExpiresAtMS > TronClaimGracePeriodMS {
+		return nil, ErrTronClaimWindowClosed
+	}
 	var disputeCount int64
 	if err := tx.Model(&TronTopupTicket{}).Where("order_id = ? AND reason = ?", order.ID, TronTicketReasonDispute).Count(&disputeCount).Error; err != nil {
 		return nil, err

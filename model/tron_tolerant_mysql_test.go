@@ -236,3 +236,43 @@ func TestTronTolerantMySQL_OrderCreationAndSettlementInterleaveSafely(t *testing
 		assert.EqualValues(t, len(creators), created)
 	})
 }
+
+func TestTronTolerantMySQL_AdminApprovalAndScannerRaceCreditOnce(t *testing.T) {
+	const userID = 940010
+	withTronTestMySQL(t, []int{userID}, func() {
+		order := mysqlTolOrder(t, "tol-mysql-approve", userID, 71_000_000, tolBaseMS)
+		transfer := tolTransfer(0x9007, 71_100_000, tolBaseMS+113_000)
+		// 客户在扫描器看到这笔款之前就提交了申诉；管理员通过工单与扫描器的容差判定同时发生。
+		ticket, err := submitTronTopupClaimAt(userID, order.TradeNo, transfer.TxID, "mine", tolBaseMS+150_000)
+		require.NoError(t, err)
+		t.Cleanup(func() { DB.Where("id = ?", ticket.ID).Delete(&TronTopupTicket{}) })
+
+		var wg, gate sync.WaitGroup
+		gate.Add(1)
+		wg.Add(2)
+		var scanErr, approveErr error
+		go func() {
+			defer wg.Done()
+			gate.Wait()
+			_, scanErr = SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+		}()
+		go func() {
+			defer wg.Done()
+			gate.Wait()
+			approveErr = ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "verified")
+		}()
+		gate.Done()
+		wg.Wait()
+
+		require.NoError(t, scanErr, "扫描与审批并发不得报错")
+		require.NoError(t, approveErr)
+		assert.Equal(t, tolFaceQuota, userQuota(t, userID), "无论谁先，都只入账一次")
+		assert.Equal(t, common.TopUpStatusSuccess, tolTopUpStatus(t, order))
+		var deposit TronDeposit
+		require.NoError(t, DB.Where("tx_id = ?", transfer.TxID).First(&deposit).Error)
+		assert.Equal(t, TronDepositStatusCredited, deposit.Status)
+		var resolved TronTopupTicket
+		require.NoError(t, DB.First(&resolved, ticket.ID).Error)
+		assert.Equal(t, TronTicketStatusResolved, resolved.Status)
+	})
+}

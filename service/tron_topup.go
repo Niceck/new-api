@@ -67,8 +67,9 @@ type TronOrderView struct {
 	ExpiresAtMS        int64  `json:"expires_at_ms"`
 	CreditQuota        int    `json:"credit_quota"`
 	Status             string `json:"status"`
-	// TolerantMatch tells the payer that an amount between the two bounds
-	// (inclusive) can be settled automatically for this order.
+	// TolerantMatch says this deployment settles inexact amounts between the
+	// two bounds (inclusive) when its timing and attribution rules also hold.
+	// It is the feature switch, not a promise about this particular order.
 	TolerantMatch         bool  `json:"tolerant_match"`
 	TolerantMinUSDTMicros int64 `json:"tolerant_min_usdt_micros"`
 	TolerantMaxUSDTMicros int64 `json:"tolerant_max_usdt_micros"`

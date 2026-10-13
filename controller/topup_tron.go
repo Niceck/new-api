@@ -171,7 +171,28 @@ func SubmitTronTopupClaim(c *gin.Context) {
 		common.ApiErrorMsg(c, "充值申诉提交失败")
 		return
 	}
-	common.ApiSuccess(c, ticket)
+	common.ApiSuccess(c, newTronClaimReceipt(ticket))
+}
+
+// tronClaimReceipt is what a claimant may see of their own ticket. The stored
+// ticket also records which account was credited, which order the
+// administrator chose, who handled it and their internal note; a ticket can be
+// settled toward another user's order, so none of that leaves this endpoint.
+// Administrators read the full ticket through the admin listing.
+type tronClaimReceipt struct {
+	ID          int64  `json:"id"`
+	TxID        string `json:"tx_id"`
+	Reason      string `json:"reason"`
+	Status      string `json:"status"`
+	CreatedAtMS int64  `json:"created_at_ms"`
+	UpdatedAtMS int64  `json:"updated_at_ms"`
+}
+
+func newTronClaimReceipt(ticket *model.TronTopupTicket) tronClaimReceipt {
+	if ticket == nil {
+		return tronClaimReceipt{}
+	}
+	return tronClaimReceipt{ID: ticket.ID, TxID: ticket.TxID, Reason: ticket.Reason, Status: ticket.Status, CreatedAtMS: ticket.CreatedAtMS, UpdatedAtMS: ticket.UpdatedAtMS}
 }
 
 func AdminListTronTopupTickets(c *gin.Context) {

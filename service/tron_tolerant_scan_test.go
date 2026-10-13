@@ -195,3 +195,24 @@ func TestTronOrderView_SwitchOffAdvertisesNoTolerance(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, status.TolerantMatchEnabled)
 }
+
+func TestTronTolerantScan_TurningTheSwitchOnNeverRevisitsRecordedDeposits(t *testing.T) {
+	service, chain, clock, _ := newTolerantScanFixture(t, false, 9307)
+	created := *clock
+	chain.transfers = []TronTransfer{tolScanTransfer(service, "a", created.Add(113*time.Second), 10_044_000)}
+	*clock = created.Add(6 * time.Minute)
+	summary, err := service.ScanOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.Unmatched)
+
+	// 开关打开后重扫到同一笔：它已经有了分类，不回头自动入账。
+	enabled := validTronTestConfig()
+	enabled.TolerantMatchEnabled = true
+	reopened := newTronTopupService(enabled, &stubTronPriceClient{}, chain, func() time.Time { return *clock }, func() (int64, error) { return 321, nil })
+	*clock = created.Add(7 * time.Minute)
+	summary, err = reopened.ScanOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, summary.Credited)
+	assert.Equal(t, int64(0), getTronServiceUserQuota(t, 9307))
+	assert.Equal(t, model.TronDepositStatusUnmatched, tolScanDeposit(t, "a").Status)
+}
