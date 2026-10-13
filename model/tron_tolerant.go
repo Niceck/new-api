@@ -443,7 +443,7 @@ func tronTolerantDepositConflict(tx *gorm.DB, transfer TronTransferRecord, candi
 	if err := tx.
 		Where("tx_id <> ? AND to_address = ? AND token_contract = ?", transfer.TxID, transfer.ToAddress, transfer.TokenContract).
 		Where("status IN ?", []string{TronDepositStatusUnmatched, TronDepositStatusReview}).
-		Where("order_id IS NULL OR order_id = ?", candidate.ID).
+		Where("(order_id IS NULL OR order_id = ?)", candidate.ID).
 		Where("block_timestamp_ms >= ? AND block_timestamp_ms <= ?", fromMS, toMS).
 		Find(&rivals).Error; err != nil {
 		return false, err
