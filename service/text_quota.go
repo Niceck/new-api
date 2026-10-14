@@ -252,6 +252,8 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			CompletionTokens: 0,
 			TotalTokens:      relayInfo.GetEstimatePromptTokens(),
 		}
+		// 整份用量缺失、按本地估算计费：打标记，日志不能记成上游实报
+		common.SetContextKey(ctx, constant.ContextKeyLocalCountTokens, true)
 	}
 
 	summary.PromptTokens = usage.PromptTokens

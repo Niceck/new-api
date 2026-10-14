@@ -127,6 +127,22 @@ func TestCompactionTokenMetaIncludesToolsAndText(t *testing.T) {
 	assert.Contains(t, meta.CombineText, `"format"`)
 }
 
+// computer_call 的正式协议是有序的 actions 数组，旧版是单个 action；两种都要读，同时出现时只按 actions 计。
+func TestResponsesTokenMetaComputerCallActions(t *testing.T) {
+	raw := `{"model":"gpt-6-astra","input":[
+		{"type":"computer_call","call_id":"c1","actions":[{"type":"type","text":"penguin"},{"type":"keypress","keys":["CTRL","S"]},{"type":"click","x":1,"y":2}]},
+		{"type":"computer_call","call_id":"c2","action":{"type":"type","text":"legacy"}},
+		{"type":"computer_call","call_id":"c3","action":{"type":"type","text":"dup"},"actions":[{"type":"type","text":"only-actions"}]}
+	]}`
+	var req OpenAIResponsesRequest
+	require.NoError(t, kitutil.Unmarshal([]byte(raw), &req))
+	meta := req.GetTokenCountMeta()
+	for _, want := range []string{"penguin", "CTRL", "S", "legacy", "only-actions"} {
+		assert.Contains(t, meta.CombineText, want)
+	}
+	assert.NotContains(t, meta.CombineText, "dup")
+}
+
 func TestResponsesTokenMetaFilesAndPlainInput(t *testing.T) {
 	pdf := fakeBase64(50_000)
 	raw := `{"model":"gpt-6-astra","input":[{"type":"message","role":"user","content":[

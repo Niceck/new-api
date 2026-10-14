@@ -7,9 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 本地估算方法：文本按分词器（或按字符数）计，音频转写按时长换算。
+// 本地估算方法：OpenAI 模型的文字用分词器，其它模型用按字符类别的估算公式，个别按字符数，音频转写按时长。
 const (
 	tokenEstimateMethodTokenizer     = "tokenizer"
+	tokenEstimateMethodHeuristic     = "heuristic"
 	tokenEstimateMethodTextNumber    = "text_number"
 	tokenEstimateMethodAudioDuration = "audio_duration"
 	tokenEstimateVersion             = 1
@@ -27,7 +28,10 @@ type TokenEstimateBreakdown struct {
 	TextTokens     int // 文字部分，不含补偿
 	OverheadTokens int // OpenAI 格式的固定补偿：每条消息 3、每个工具 8、每个 name 3，再加 3
 	ImageCount     int // 参与估算的图片张数（同一张图出现两次算两次）
-	OtherFileCount int // 音频、视频、文档等其它文件个数（音频转写是上传的文件数）
+	// ImageFallbackCount OpenAI 模型本该按尺寸计、却按固定额度计的图片：URL 图片（估算阶段不下载）
+	// 与读不出尺寸的图片。其它模型的图片本来就是固定额度，不算在内。
+	ImageFallbackCount int
+	OtherFileCount     int // 音频、视频、文档等其它文件个数（音频转写是上传的文件数）
 }
 
 // appendTokenEstimateAdminInfo 把本次请求的估算构成写进 admin_info；没做本地估算（关了计数、
@@ -41,12 +45,13 @@ func appendTokenEstimateAdminInfo(ctx *gin.Context, adminInfo map[string]interfa
 		return
 	}
 	adminInfo["input_token_estimate"] = map[string]interface{}{
-		"version":          tokenEstimateVersion,
-		"method":           est.Method,
-		"total_tokens":     est.TotalTokens,
-		"text_tokens":      est.TextTokens,
-		"overhead_tokens":  est.OverheadTokens,
-		"image_count":      est.ImageCount,
-		"other_file_count": est.OtherFileCount,
+		"version":              tokenEstimateVersion,
+		"method":               est.Method,
+		"total_tokens":         est.TotalTokens,
+		"text_tokens":          est.TextTokens,
+		"overhead_tokens":      est.OverheadTokens,
+		"image_count":          est.ImageCount,
+		"image_fallback_count": est.ImageFallbackCount,
+		"other_file_count":     est.OtherFileCount,
 	}
 }

@@ -52,7 +52,7 @@ func TestEstimateRequestTokenRecordsBreakdownClaude(t *testing.T) {
 	require.NoError(t, err)
 
 	got := estimateOf(t, ctx)
-	assert.Equal(t, "tokenizer", got.Method)
+	assert.Equal(t, "heuristic", got.Method, "Claude 的文字走估算公式，不是分词器")
 	assert.Equal(t, tokens, got.TotalTokens)
 	assert.Equal(t, 2, got.ImageCount)
 	assert.Equal(t, 1, got.OtherFileCount)
@@ -112,7 +112,7 @@ func TestGenerateTextOtherInfoIncludesEstimate(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, map[string]interface{}{
 		"version": 1, "method": "tokenizer", "total_tokens": 5_200, "text_tokens": 3_631,
-		"overhead_tokens": 9, "image_count": 3, "other_file_count": 0,
+		"overhead_tokens": 9, "image_count": 3, "image_fallback_count": 0, "other_file_count": 0,
 	}, adminInfo["input_token_estimate"])
 	_, local := adminInfo["local_count_tokens"]
 	assert.False(t, local, "成功请求也写估算，不依赖本地兜底标记")

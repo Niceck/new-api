@@ -81,10 +81,17 @@ func (w *responsesTokenWalker) walkItem(item map[string]any) {
 	case "function_call_output", "custom_tool_call_output", "local_shell_call_output", "apply_patch_call_output":
 		w.walkContent(item["output"], 0)
 	case "computer_call":
-		// 只取动作里的可读输入（键入的文字、按键），坐标不是正文
-		if action, ok := item["action"].(map[string]any); ok {
-			w.addText(action["text"])
-			w.addText(action["keys"])
+		// 只取动作里的可读输入（键入的文字、按键），坐标不是正文。正式协议是有序的 actions 数组，
+		// 旧版是单个 action；有 actions 就只按它计，免得同一动作算两次。
+		actions, hasActions := item["actions"].([]any)
+		if !hasActions {
+			actions = []any{item["action"]}
+		}
+		for _, a := range actions {
+			if action, ok := a.(map[string]any); ok {
+				w.addText(action["text"])
+				w.addText(action["keys"])
+			}
 		}
 	case "computer_call_output":
 		if output, ok := item["output"].(map[string]any); ok {

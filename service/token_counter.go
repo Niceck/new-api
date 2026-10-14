@@ -19,11 +19,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, stream bool) (int, error) {
-	if fileMeta == nil || fileMeta.Source == nil {
-		return 0, fmt.Errorf("image_url_is_nil")
-	}
+// imageTokenProfile 按模型名定图片 token 的计法（从 getImageToken 抽出来，估算的固定额度也用它）。
+type imageTokenProfile struct {
+	fixed        int // >0 时不论尺寸都是这个数（glm-4）
+	baseTokens   int
+	tileTokens   int
+	isPatchBased bool
+	multiplier   float64
+}
 
+func getImageTokenProfile(model string) imageTokenProfile {
 	// Defaults for 4o/4.1/4.5 family unless overridden below
 	baseTokens := 85
 	tileTokens := 170
@@ -33,7 +38,7 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 
 	// Special cases from existing behavior
 	if strings.HasPrefix(lowerModel, "glm-4") {
-		return 1047, nil
+		return imageTokenProfile{fixed: 1047}
 	}
 
 	// Patch-based models (32x32 patches, capped at 1536, with multiplier)
@@ -76,6 +81,45 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 			tileTokens = 170
 		}
 	}
+	return imageTokenProfile{baseTokens: baseTokens, tileTokens: tileTokens, isPatchBased: isPatchBased, multiplier: multiplier}
+}
+
+// imageTokensWithoutContent 不读图片内容时的固定额度，与 getImageToken 关闭媒体读取时的取值一致。
+func imageTokensWithoutContent(model string, detail string) int {
+	p := getImageTokenProfile(model)
+	if p.fixed > 0 {
+		return p.fixed
+	}
+	if detail == "low" && !p.isPatchBased {
+		return p.baseTokens
+	}
+	return 3 * p.baseTokens
+}
+
+// estimateOpenAIImageTokens 本地估算 OpenAI 模型的一张图片。估算阶段不联网：URL 图片直接按固定额度；
+// base64 图片读尺寸，读不出来也退回固定额度，不拒请求（上游可能照样能读，拒掉等于本站替上游做准入）。
+// 第二个返回值表示用了固定额度。日志不带图片标识——base64 的标识里有客户数据的开头。
+func estimateOpenAIImageTokens(c *gin.Context, index int, file *types.FileMeta, model string, stream bool) (int, bool) {
+	if file.Source != nil && !file.Source.IsURL() {
+		token, err := getImageToken(c, file, model, stream)
+		if err == nil {
+			return token, false
+		}
+		logger.LogWarn(c, fmt.Sprintf("estimate: image %d size unreadable, using fixed tokens", index))
+	}
+	return imageTokensWithoutContent(model, file.Detail), true
+}
+
+func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, stream bool) (int, error) {
+	if fileMeta == nil || fileMeta.Source == nil {
+		return 0, fmt.Errorf("image_url_is_nil")
+	}
+	profile := getImageTokenProfile(model)
+	if profile.fixed > 0 {
+		return profile.fixed, nil
+	}
+	baseTokens, tileTokens := profile.baseTokens, profile.tileTokens
+	isPatchBased, multiplier := profile.isPatchBased, profile.multiplier
 
 	// Respect existing feature flags/short-circuits
 	if fileMeta.Detail == "low" && !isPatchBased {
@@ -227,11 +271,14 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 	model := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 	tkm := 0
 
-	method := tokenEstimateMethodTokenizer
+	method := tokenEstimateMethodHeuristic // 非 OpenAI 模型的文字走 EstimateTokenByModel，见 CountTextToken
 	if meta.TokenType == types.TokenTypeTextNumber {
 		method = tokenEstimateMethodTextNumber
 		tkm += utf8.RuneCountInString(meta.CombineText)
 	} else {
+		if common.IsOpenAITextModel(model) {
+			method = tokenEstimateMethodTokenizer
+		}
 		tkm += CountTextToken(meta.CombineText, model)
 	}
 	textTokens := tkm
@@ -282,15 +329,15 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 		file.FileType = DetectFileType(cachedData.MimeType)
 	}
 
-	images := 0
+	images, imageFallbacks := 0, 0
 	for i, file := range meta.Files {
 		switch file.FileType {
 		case types.FileTypeImage:
 			images++
 			if common.IsOpenAITextModel(model) {
-				token, err := getImageToken(c, file, model, info.IsStream)
-				if err != nil {
-					return 0, fmt.Errorf("error counting image token, media index[%d], identifier[%s], err: %v", i, file.GetIdentifier(), err)
+				token, fallback := estimateOpenAIImageTokens(c, i, file, model, info.IsStream)
+				if fallback {
+					imageFallbacks++
 				}
 				tkm += token
 			} else {
@@ -309,12 +356,13 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 
 	common.SetContextKey(c, constant.ContextKeyPromptTokens, tkm)
 	common.SetContextKey(c, constant.ContextKeyTokenEstimate, TokenEstimateBreakdown{
-		Method:         method,
-		TotalTokens:    tkm,
-		TextTokens:     textTokens,
-		OverheadTokens: overheadTokens,
-		ImageCount:     images,
-		OtherFileCount: len(meta.Files) - images,
+		Method:             method,
+		TotalTokens:        tkm,
+		TextTokens:         textTokens,
+		OverheadTokens:     overheadTokens,
+		ImageCount:         images,
+		ImageFallbackCount: imageFallbacks,
+		OtherFileCount:     len(meta.Files) - images,
 	})
 	return tkm, nil
 }

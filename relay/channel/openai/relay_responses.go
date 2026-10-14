@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -165,11 +166,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			// 非正常结束，使用输出文本的 token 数量
 			completionTokens := service.CountTextToken(tempStr, info.UpstreamModelName)
 			usage.CompletionTokens = completionTokens
+			common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 		}
 	}
 
 	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
 		usage.PromptTokens = info.GetEstimatePromptTokens()
+		// 输入是本地估的：打标记，日志的 usage_billing_path 记 local 而不是 upstream
+		common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 	}
 
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
