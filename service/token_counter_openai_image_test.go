@@ -15,6 +15,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,13 @@ func TestEstimateRequestTokenOpenAIImagesNeverDownloadOrReject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	enableTokenCountingForTest(t)
 	InitTokenEncoders() // OpenAI 模型的文字走 tiktoken
+
+	// 关掉下载的 SSRF 防护，让任何下载尝试都真的打到测试服务上——否则本机地址先被防护拒掉，
+	// 「没下载」与「试了下载、被拒、再退回固定额度」分不出来。
+	fetch := system_setting.GetFetchSetting()
+	prevSSRF := fetch.EnableSSRFProtection
+	fetch.EnableSSRFProtection = false
+	t.Cleanup(func() { fetch.EnableSSRFProtection = prevSSRF })
 
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
