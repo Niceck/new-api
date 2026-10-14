@@ -118,6 +118,11 @@ func claudeContentBlocks(content any) []map[string]any {
 		for _, item := range v {
 			if block, ok := item.(map[string]any); ok {
 				blocks = append(blocks, block)
+				continue
+			}
+			// 混在 []any 里的强类型块（代码拼出来的内容）逐个转成 map；数字、字符串这类不是块的元素跳过
+			if block, err := kitutil.Any2Type[map[string]any](item); err == nil && block != nil {
+				blocks = append(blocks, block)
 			}
 		}
 		return blocks

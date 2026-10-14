@@ -178,8 +178,8 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	}
 	if claudeInfo.Usage != nil && claudeInfo.Usage.BillingUsage == nil {
 		billingUsage := dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
-		// 上游没给过任何用量事件、输入又是本地估的：标成估算，日志记 …-estimated 而不是上游实报
-		// （2026-10-14 按估算多扣十倍的几笔，日志里都记成了 billing-usage-anthropic）。
+		// 没有上游给出的有效用量（没收到用量事件，或收到的全是 0）、输入又是本地估的：标成估算，
+		// 日志记 …-estimated 而不是上游实报（2026-10-14 按估算多扣十倍的几笔都记成了 billing-usage-anthropic）。
 		if billingUsage != nil && promptEstimated {
 			billingUsage.Estimated = true
 		}

@@ -184,6 +184,25 @@ func TestClaudeTokenMetaTypedContentMatchesJSON(t *testing.T) {
 	assert.Equal(t, types.FileTypeImage, fromTyped.Files[0].FileType)
 }
 
+// []any 里混着强类型块（代码拼出来的内容）也要按同一规则计，不能静默丢掉。
+func TestClaudeTokenMetaMixedTypedBlocksInAnySlice(t *testing.T) {
+	img := fakeBase64(10_000)
+	text := "混合构造的文字"
+	req := &ClaudeRequest{Model: "claude-opus-5-5", Messages: []ClaudeMessage{{Role: "user", Content: []any{
+		ClaudeMediaMessage{Type: "text", Text: &text},
+		&ClaudeMediaMessage{Type: "image", Source: &ClaudeMessageSource{Type: "base64", MediaType: "image/png", Data: img}},
+		map[string]any{"type": "text", "text": "普通 map 块"},
+		42,
+	}}}}
+	meta := req.GetTokenCountMeta()
+
+	assert.Contains(t, meta.CombineText, text)
+	assert.Contains(t, meta.CombineText, "普通 map 块")
+	assert.NotContains(t, meta.CombineText, img[:64])
+	require.Len(t, meta.Files, 1)
+	assert.Equal(t, types.FileTypeImage, meta.Files[0].FileType)
+}
+
 // 嵌套深度有上限：构造的深层嵌套不再往下计，也不会无限递归。
 func TestClaudeTokenMetaDepthLimit(t *testing.T) {
 	inner := `[{"type":"text","text":"最深处"}]`
