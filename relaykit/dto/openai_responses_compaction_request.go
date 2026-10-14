@@ -31,11 +31,12 @@ func (r *OpenAIResponsesCompactionRequest) GetTokenCountMeta() *types.TokenCount
 	if len(r.Instructions) > 0 {
 		parts = append(parts, string(r.Instructions))
 	}
-	if len(r.Input) > 0 {
-		parts = append(parts, string(r.Input))
-	}
+	// input 按条目拆开，图片、文件按媒体计，加密内容不计；见 openai_responses_token_meta.go
+	texts, files := collectResponsesInputForTokenCount(r.Input)
+	parts = append(parts, texts...)
 	return &types.TokenCountMeta{
 		CombineText: strings.Join(parts, "\n"),
+		Files:       files,
 	}
 }
 

@@ -257,20 +257,20 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 			continue
 		}
 
-		// 如果文件类型未知且需要获取，通过 MIME 类型检测
-		if file.FileType == "" || (file.Source.IsURL() && shouldFetchFiles) {
-			// 注意：这里我们直接调用 LoadFileSource 而不是 GetMimeType
-			// 因为 GetMimeType 内部可能会调用 GetFileTypeFromUrl (HEAD 请求)
-			// 而我们这里既然要计算 token，通常需要完整数据
-			cachedData, err := LoadFileSource(c, file.Source, "token_counter")
-			if err != nil {
-				if shouldFetchFiles {
-					return 0, fmt.Errorf("error getting file type: %v", err)
-				}
-				continue
-			}
-			file.FileType = DetectFileType(cachedData.MimeType)
+		// 只为探测「类型未知」的文件加载内容，且要开关允许。已知类型用不到内容：非 OpenAI 模型的
+		// 图片、文件都是固定估值；OpenAI 图片的尺寸由 getImageToken 自己按同样的开关加载。
+		// 旧条件对已知类型的 URL 也先整份下载（Claude 图片下载完仍只加 520），类型未知时又无视开关。
+		if file.FileType != "" || !shouldFetchFiles {
+			continue
 		}
+		// 注意：这里我们直接调用 LoadFileSource 而不是 GetMimeType
+		// 因为 GetMimeType 内部可能会调用 GetFileTypeFromUrl (HEAD 请求)
+		// 而我们这里既然要计算 token，通常需要完整数据
+		cachedData, err := LoadFileSource(c, file.Source, "token_counter")
+		if err != nil {
+			return 0, fmt.Errorf("error getting file type: %v", err)
+		}
+		file.FileType = DetectFileType(cachedData.MimeType)
 	}
 
 	for i, file := range meta.Files {

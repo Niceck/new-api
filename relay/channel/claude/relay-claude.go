@@ -156,6 +156,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	if claudeInfo.Usage.PromptTokens == 0 {
 		//上游出错
 	}
+	promptEstimated := false
 	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
@@ -168,6 +169,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		}
 		if claudeInfo.Usage.PromptTokens == 0 {
 			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
+			promptEstimated = fallback.PromptTokens > 0
 		}
 		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 	}
@@ -175,7 +177,13 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		claudeInfo.Usage.UsageSemantic = "anthropic"
 	}
 	if claudeInfo.Usage != nil && claudeInfo.Usage.BillingUsage == nil {
-		claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
+		billingUsage := dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
+		// 上游没给过任何用量事件、输入又是本地估的：标成估算，日志记 …-estimated 而不是上游实报
+		// （2026-10-14 按估算多扣十倍的几笔，日志里都记成了 billing-usage-anthropic）。
+		if billingUsage != nil && promptEstimated {
+			billingUsage.Estimated = true
+		}
+		claudeInfo.Usage.BillingUsage = billingUsage
 	}
 
 	// 隐私敏感：复用已累积的 ResponseText，不另起采集器（见 chat_content_logger.go）。
