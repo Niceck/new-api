@@ -57,6 +57,8 @@ const (
 	ContextKeyUserName    ContextKey = "username"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
+	// ContextKeyTokenEstimate 本地估算的构成（service.TokenEstimateBreakdown），日志写进 admin_info.estimate
+	ContextKeyTokenEstimate ContextKey = "token_estimate"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
 

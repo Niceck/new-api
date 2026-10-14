@@ -31,11 +31,20 @@ func (r *OpenAIResponsesCompactionRequest) GetTokenCountMeta() *types.TokenCount
 	if len(r.Instructions) > 0 {
 		parts = append(parts, string(r.Instructions))
 	}
-	if len(r.Input) > 0 {
-		parts = append(parts, string(r.Input))
+	// input 与普通 Responses 共用按条目的提取，不再原样当文字（图片、加密内容曾全被算进去）；
+	// 见 openai_responses_token_meta.go
+	texts, files := collectResponsesInputForTokenCount(r.Input)
+	parts = append(parts, texts...)
+	// 工具定义与输出格式同普通 Responses 一样计入（旧实现漏了）
+	if len(r.Tools) > 0 {
+		parts = append(parts, string(r.Tools))
+	}
+	if len(r.Text) > 0 {
+		parts = append(parts, string(r.Text))
 	}
 	return &types.TokenCountMeta{
 		CombineText: strings.Join(parts, "\n"),
+		Files:       files,
 	}
 }
 

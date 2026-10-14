@@ -181,6 +181,7 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 				}
 			}
 		}
+		texts = appendChatToolCallsForTokenCount(message.ToolCalls, texts)
 	}
 
 	if r.Tools != nil {
@@ -911,31 +912,14 @@ func (r OpenAIResponsesRequest) MarshalJSON() ([]byte, error) {
 }
 
 func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
-	var fileMeta = make([]*types.FileMeta, 0)
-	var texts = make([]string, 0)
-
-	if r.Input != nil {
-		inputs := r.ParseInput()
-		for _, input := range inputs {
-			if input.Type == "input_image" {
-				if input.ImageUrl != "" {
-					fileMeta = append(fileMeta, &types.FileMeta{
-						FileType: types.FileTypeImage,
-						Source:   types.NewFileSourceFromData(input.ImageUrl, ""),
-						Detail:   input.Detail,
-					})
-				}
-			} else if input.Type == "input_file" {
-				if input.FileUrl != "" {
-					fileMeta = append(fileMeta, &types.FileMeta{
-						FileType: types.FileTypeFile,
-						Source:   types.NewFileSourceFromData(input.FileUrl, ""),
-					})
-				}
-			} else {
-				texts = append(texts, input.Text)
-			}
-		}
+	// input 按条目拆：函数调用与输出、推理、shell 等都计文字，图片与文件按媒体计，加密内容不计；
+	// 见 openai_responses_token_meta.go（与 compact 共用）
+	texts, fileMeta := collectResponsesInputForTokenCount(r.Input)
+	if texts == nil {
+		texts = make([]string, 0)
+	}
+	if fileMeta == nil {
+		fileMeta = make([]*types.FileMeta, 0)
 	}
 
 	if len(r.Instructions) > 0 {

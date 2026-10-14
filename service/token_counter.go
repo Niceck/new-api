@@ -216,17 +216,25 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 			// 一分钟 1000 token，与 $price / minute 对齐。
 			totalAudioToken += common.QuotaRound(math.Ceil(duration) / 60.0 * 1000)
 		}
+		common.SetContextKey(c, constant.ContextKeyTokenEstimate, TokenEstimateBreakdown{
+			Method:         tokenEstimateMethodAudioDuration,
+			TotalTokens:    totalAudioToken,
+			OtherFileCount: len(fileHeaders),
+		})
 		return totalAudioToken, nil
 	}
 
 	model := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 	tkm := 0
 
+	method := tokenEstimateMethodTokenizer
 	if meta.TokenType == types.TokenTypeTextNumber {
+		method = tokenEstimateMethodTextNumber
 		tkm += utf8.RuneCountInString(meta.CombineText)
 	} else {
 		tkm += CountTextToken(meta.CombineText, model)
 	}
+	textTokens := tkm
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		tkm += meta.ToolsCount * 8
@@ -234,6 +242,7 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 		tkm += meta.NameCount * 3
 		tkm += 3
 	}
+	overheadTokens := tkm - textTokens
 
 	shouldFetchFiles := true
 
@@ -273,9 +282,11 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 		file.FileType = DetectFileType(cachedData.MimeType)
 	}
 
+	images := 0
 	for i, file := range meta.Files {
 		switch file.FileType {
 		case types.FileTypeImage:
+			images++
 			if common.IsOpenAITextModel(model) {
 				token, err := getImageToken(c, file, model, info.IsStream)
 				if err != nil {
@@ -297,6 +308,14 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 	}
 
 	common.SetContextKey(c, constant.ContextKeyPromptTokens, tkm)
+	common.SetContextKey(c, constant.ContextKeyTokenEstimate, TokenEstimateBreakdown{
+		Method:         method,
+		TotalTokens:    tkm,
+		TextTokens:     textTokens,
+		OverheadTokens: overheadTokens,
+		ImageCount:     images,
+		OtherFileCount: len(meta.Files) - images,
+	})
 	return tkm, nil
 }
 
