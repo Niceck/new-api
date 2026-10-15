@@ -139,6 +139,23 @@ func GroupAllowedOnHost(group, requestHost string) bool {
 	return ok
 }
 
+// GroupEntryFirstHosts 返回每个受限分组的对客入口（登记顺序里第一个合规的主机名），
+// 供前端给这个分组的令牌拼接入地址。主机名全不合规的分组在哪都用不了，不列出。
+// 返回的是新建的 map，调用方可以随意修改。
+func GroupEntryFirstHosts() map[string]string {
+	policy := groupEntryPolicySnapshot.Load()
+	if policy == nil {
+		return map[string]string{}
+	}
+	hosts := make(map[string]string, len(policy.groups))
+	for group, entry := range policy.groups {
+		if entry.first != "" {
+			hosts[group] = entry.first
+		}
+	}
+	return hosts
+}
+
 // GroupEntryRejectMessage 返回分组走错入口时回给客户端的提示；分组不受限时返回空串。
 // 提示里的入口取登记顺序里的第一个，所以对客地址要排在最前。
 func GroupEntryRejectMessage(group string) string {

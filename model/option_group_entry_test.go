@@ -87,3 +87,22 @@ func TestValidateOptionValue_GroupEntryRejectMessage(t *testing.T) {
 	require.ErrorContains(t, validateOptionValue(key, "请改用 {host}"), "{host}")
 	require.ErrorContains(t, validateOptionValue(key, "第一行\n第二行"), "控制字符")
 }
+
+// 对客接口地址进令牌页的一键导入链接：写入时就拦住带路径、结尾斜杠的值。
+func TestValidateOptionValue_ApiBaseURL(t *testing.T) {
+	const key = "general_setting.api_base_url"
+
+	require.NoError(t, validateOptionValue(key, ""))
+	require.NoError(t, validateOptionValue(key, "https://cc.yzzt.top"))
+	require.ErrorContains(t, validateOptionValue(key, "https://cc.yzzt.top/"), "结尾斜杠")
+	require.ErrorContains(t, validateOptionValue(key, "cc.yzzt.top"), "http")
+}
+
+// 经 handleConfigUpdate 落到字段上，/api/status 读到的就是新值。
+func TestHandleConfigUpdate_AppliesApiBaseURL(t *testing.T) {
+	const key = "general_setting.api_base_url"
+	t.Cleanup(func() { handleConfigUpdate(key, "") })
+
+	require.True(t, handleConfigUpdate(key, "https://cc.yzzt.top"))
+	require.Equal(t, "https://cc.yzzt.top", operation_setting.GetGeneralSetting().ApiBaseURL)
+}

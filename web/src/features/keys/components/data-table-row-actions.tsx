@@ -28,7 +28,7 @@ import {
   Link,
   Loader2,
 } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -54,21 +54,10 @@ import { copyToClipboard } from '@/lib/copy-to-clipboard'
 
 import { updateApiKeyStatus } from '../api'
 import { API_KEY_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
+import { useTokenApiBase } from '../hooks/use-token-api-base'
+import { isCCSwitchPreset } from '../lib/cc-switch-url'
 import { apiKeySchema } from '../types'
 import { useApiKeys } from './api-keys-provider'
-
-function getServerAddress(): string {
-  try {
-    const raw = localStorage.getItem('status')
-    if (raw) {
-      const status = JSON.parse(raw)
-      if (status.server_address) return status.server_address as string
-    }
-  } catch {
-    /* empty */
-  }
-  return window.location.origin
-}
 
 type DataTableRowActionsProps<TData> = {
   row: Row<TData>
@@ -78,7 +67,7 @@ export function DataTableRowActions<TData>({
   row,
 }: DataTableRowActionsProps<TData>) {
   const { t } = useTranslation()
-  const apiKey = apiKeySchema.parse(row.original)
+  const apiKey = useMemo(() => apiKeySchema.parse(row.original), [row.original])
   const {
     setOpen,
     setCurrentRow,
@@ -89,7 +78,9 @@ export function DataTableRowActions<TData>({
     loadingKeys,
   } = useApiKeys()
   const isEnabled = apiKey.status === API_KEY_STATUS.ENABLED
-  const { chatPresets, serverAddress } = useChatPresets()
+  const { chatPresets } = useChatPresets()
+  // 复制地址、聊天预设、CC Switch 都用这个令牌自己的接入地址（分组可能限定了入口）
+  const { apiBase } = useTokenApiBase(apiKey.group)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
   const resolvedRealKey = resolvedKeys[apiKey.id]
   const isRealKeyLoading = Boolean(loadingKeys[apiKey.id])
@@ -118,8 +109,16 @@ export function DataTableRowActions<TData>({
       const realKey = await resolveRealKey(apiKey.id)
       if (!realKey) return
 
+      // 聊天预设里写 "ccswitch" 的条目没有可拼的链接模板，打开与菜单里同一个导入对话框
+      if (isCCSwitchPreset(preset.url)) {
+        setResolvedKey(realKey)
+        setCurrentRow(apiKey)
+        setOpen('cc-switch')
+        return
+      }
+
       if (preset.type === 'fluent') {
-        const success = sendToFluent(realKey, serverAddress)
+        const success = sendToFluent(realKey, apiBase)
         if (success) {
           toast.success(t('Sent the API key to FluentRead.'))
         } else {
@@ -135,7 +134,7 @@ export function DataTableRowActions<TData>({
       const resolvedUrl = resolveChatUrl({
         template: preset.url,
         apiKey: realKey,
-        serverAddress,
+        serverAddress: apiBase,
       })
 
       if (!resolvedUrl) {
@@ -151,7 +150,7 @@ export function DataTableRowActions<TData>({
         window.location.href = resolvedUrl
       }
     },
-    [resolveRealKey, apiKey.id, serverAddress, t]
+    [resolveRealKey, apiKey, apiBase, setResolvedKey, setCurrentRow, setOpen, t]
   )
 
   const handleToggleStatus = async (
@@ -252,8 +251,7 @@ export function DataTableRowActions<TData>({
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={async () => {
-            const serverUrl = getServerAddress()
-            const ok = await copyToClipboard(serverUrl)
+            const ok = await copyToClipboard(apiBase)
             if (ok) toast.success(t('Copied'))
           }}
         >

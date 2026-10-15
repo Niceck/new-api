@@ -269,3 +269,31 @@ func TestGroupEntryHosts_ConfigFrameworkReplacesWholeMap(t *testing.T) {
 	require.False(t, GroupAllowedOnHost("claude kiro", "cc.yzzt.top"))
 	require.Equal(t, "claude kiro 走 kiro.yzzt.top", GroupEntryRejectMessage("claude kiro"))
 }
+
+// 给前端拼令牌接入地址用：每个受限分组取登记顺序里第一个合规的主机名（对客地址排最前）。
+func TestGroupEntryFirstHosts_ListsFirstUsableHostPerGroup(t *testing.T) {
+	withGroupEntryHosts(t, map[string][]string{
+		"claude kiro": {"Bad Host", "kiro.yzzt.top", "kiro2.yzzt.top"},
+		"满血稳定claude":  {"cc.yzzt.top"},
+	}, "")
+
+	require.Equal(t, map[string]string{
+		"claude kiro": "kiro.yzzt.top",
+		"满血稳定claude":  "cc.yzzt.top",
+	}, GroupEntryFirstHosts())
+}
+
+// 主机名全不合规的分组在哪都用不了，没有可给的地址，不列出来。
+func TestGroupEntryFirstHosts_SkipsGroupsWithoutUsableHost(t *testing.T) {
+	withGroupEntryHosts(t, map[string][]string{"claude kiro": {"KIRO.yzzt.top"}}, "")
+	require.Empty(t, GroupEntryFirstHosts())
+}
+
+func TestGroupEntryFirstHosts_EmptyByDefaultAndReturnsACopy(t *testing.T) {
+	require.Empty(t, GroupEntryFirstHosts())
+
+	withGroupEntryHosts(t, map[string][]string{"claude kiro": {"kiro.yzzt.top"}}, "")
+	got := GroupEntryFirstHosts()
+	got["claude kiro"] = "evil.example.com"
+	require.Equal(t, map[string]string{"claude kiro": "kiro.yzzt.top"}, GroupEntryFirstHosts())
+}

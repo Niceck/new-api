@@ -41,6 +41,20 @@ func TestStatus(c *gin.Context) {
 	return
 }
 
+// publicGroupEntryHosts 是下发给前端的「分组 -> 对客入口」：令牌页据此给限定入口的分组
+// 拼接入地址。/api/status 不登录也能读，只列对客可见的分组，管理员专用分组即使登记了
+// 入口也不下发（免得把分组名泄露出去）。
+func publicGroupEntryHosts() map[string]string {
+	usable := setting.GetUserUsableGroupsCopy()
+	hosts := operation_setting.GroupEntryFirstHosts()
+	for group := range hosts {
+		if _, ok := usable[group]; !ok {
+			delete(hosts, group)
+		}
+	}
+	return hosts
+}
+
 func GetStatus(c *gin.Context) {
 
 	cs := console_setting.GetConsoleSetting()
@@ -70,6 +84,8 @@ func GetStatus(c *gin.Context) {
 		"wechat_qrcode":               common.WeChatAccountQRCodeImageURL,
 		"wechat_login":                common.WeChatAuthEnabled,
 		"server_address":              system_setting.ServerAddress,
+		"api_base_url":                operation_setting.GetGeneralSetting().ApiBaseURL,
+		"group_entry_host":            publicGroupEntryHosts(),
 		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
 		"quota_per_unit":              common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
