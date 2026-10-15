@@ -182,7 +182,10 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	}
 	// 输入是估的就重建计费用量：message_start 只带输出时它已非空，结算优先用它，不重建输入就按 0 计。
 	if claudeInfo.Usage != nil && (claudeInfo.Usage.BillingUsage == nil || promptEstimated) {
-		billingUsage := dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
+		snapshot := buildMessageDeltaPatchUsage(nil, claudeInfo)
+		// buildMessageDeltaPatchUsage 只补输入与缓存；输出要从最终用量带上，否则结算按 0 计。
+		snapshot.OutputTokens = claudeInfo.Usage.CompletionTokens
+		billingUsage := dto.NewClaudeMessagesBillingUsage(snapshot)
 		// 没有上游给出的有效用量（没收到用量事件，或收到的全是 0）、输入又是本地估的：标成估算，
 		// 日志记 …-estimated 而不是上游实报（2026-10-14 按估算多扣十倍的几笔都记成了 billing-usage-anthropic）。
 		if billingUsage != nil && promptEstimated {
@@ -210,14 +213,17 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	}
 }
 
-// hasUpstreamInputUsage：上游是否报过输入侧用量（未缓存输入、缓存读、缓存写任一非 0）。
+// hasUpstreamInputUsage：上游是否报过输入侧用量（未缓存输入、缓存读、缓存写汇总或 5m/1h 拆分任一非 0）。
+// 有的中转只报缓存写拆分、汇总为 0；漏看拆分会再叠一份估算输入。
 func hasUpstreamInputUsage(usage *dto.Usage) bool {
 	if usage == nil {
 		return false
 	}
 	return usage.PromptTokens > 0 ||
 		usage.PromptTokensDetails.CachedTokens > 0 ||
-		usage.PromptTokensDetails.CachedCreationTokens > 0
+		usage.PromptTokensDetails.CachedCreationTokens > 0 ||
+		usage.ClaudeCacheCreation5mTokens > 0 ||
+		usage.ClaudeCacheCreation1hTokens > 0
 }
 
 // clientGoneUsageGrace：客户端在上游出首字前就断开时，最多再等这么久读上游的 message_start（测试里会改短）。

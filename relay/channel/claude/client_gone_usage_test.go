@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +118,77 @@ func TestClaudeStreamHandlerClientGoneOutputOnlyMessageStartUsesEstimate(t *test
 	assert.True(t, usage.BillingUsage.Estimated)
 	require.NotNil(t, usage.BillingUsage.ClaudeUsage)
 	assert.Equal(t, clientGoneEstimate, usage.BillingUsage.ClaudeUsage.InputTokens, "结算用的是计费用量，输入要在这里补上")
+	assert.Equal(t, 1, usage.BillingUsage.ClaudeUsage.OutputTokens, "重建时不能把上游已报的输出清零")
+}
+
+// message_start 只带输出，输入在宽限期内的 message_delta 里补齐：用上游的，不估算、不等满宽限期。
+func TestClaudeStreamHandlerClientGoneInputArrivesInMessageDelta(t *testing.T) {
+	withClientGoneUsageGrace(t, 3*time.Second)
+	usage, _, elapsed := runClientGoneClaudeStream(t, func(w *io.PipeWriter) {
+		writeMessageStart(w, `{"input_tokens":0,"output_tokens":1}`)
+		time.Sleep(100 * time.Millisecond)
+		_, _ = fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"+
+			"\"usage\":{\"input_tokens\":2,\"cache_read_input_tokens\":400000,\"output_tokens\":3}}\n\n")
+	})
+
+	assert.Less(t, elapsed, 2*time.Second)
+	assert.Equal(t, 2, usage.PromptTokens)
+	assert.Equal(t, 400_000, usage.PromptTokensDetails.CachedTokens)
+	require.NotNil(t, usage.BillingUsage)
+	assert.False(t, usage.BillingUsage.Estimated)
+	assert.Equal(t, 3, usage.BillingUsage.ClaudeUsage.OutputTokens)
+}
+
+// 只报缓存写的 5m/1h 拆分、汇总字段为 0：这也是上游实报的输入，不能再叠估算。
+func TestClaudeStreamHandlerClientGoneCacheCreationSplitOnly(t *testing.T) {
+	cases := []struct {
+		name   string
+		split  string
+		want5m int
+		want1h int
+	}{
+		{"只有 5m", `{"ephemeral_5m_input_tokens":1000}`, 1000, 0},
+		{"只有 1h", `{"ephemeral_1h_input_tokens":2000}`, 0, 2000},
+		{"两者都有", `{"ephemeral_5m_input_tokens":1000,"ephemeral_1h_input_tokens":2000}`, 1000, 2000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withClientGoneUsageGrace(t, 3*time.Second)
+			usage, _, elapsed := runClientGoneClaudeStream(t, func(w *io.PipeWriter) {
+				writeMessageStart(w, `{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,`+
+					`"cache_creation":`+tc.split+`,"output_tokens":0}`)
+			})
+
+			assert.Less(t, elapsed, 2*time.Second, "拆分也算拿到输入用量，应当及时结束")
+			assert.Equal(t, 0, usage.PromptTokens, "不能补估算输入")
+			require.NotNil(t, usage.BillingUsage)
+			assert.False(t, usage.BillingUsage.Estimated)
+			require.NotNil(t, usage.BillingUsage.ClaudeUsage)
+			assert.Equal(t, 0, usage.BillingUsage.ClaudeUsage.InputTokens)
+			require.NotNil(t, usage.BillingUsage.ClaudeUsage.CacheCreation)
+			assert.Equal(t, tc.want5m, usage.BillingUsage.ClaudeUsage.CacheCreation.Ephemeral5mInputTokens)
+			assert.Equal(t, tc.want1h, usage.BillingUsage.ClaudeUsage.CacheCreation.Ephemeral1hInputTokens)
+		})
+	}
+}
+
+// 客户端没断、上游提前 EOF（message_start 只带输出、没有 message_delta）：输入按估算补，输出保留上游的。
+func TestHandleStreamFinalResponseOutputOnlyStartKeepsOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	claudeInfo := &ClaudeResponseInfo{ResponseText: strings.Builder{}, Usage: &dto.Usage{}}
+	FormatClaudeResponseInfo(&dto.ClaudeResponse{Type: "message_start", Message: &dto.ClaudeMediaMessage{
+		Usage: &dto.ClaudeUsage{OutputTokens: 7},
+	}}, nil, claudeInfo)
+	claudeInfo.ResponseText.WriteString("部分输出")
+
+	HandleStreamFinalResponse(ctx, newFinalResponseTestInfo(clientGoneEstimate), claudeInfo)
+
+	require.NotNil(t, claudeInfo.Usage.BillingUsage)
+	assert.True(t, claudeInfo.Usage.BillingUsage.Estimated)
+	assert.Equal(t, clientGoneEstimate, claudeInfo.Usage.BillingUsage.ClaudeUsage.InputTokens)
+	assert.Equal(t, claudeInfo.Usage.CompletionTokens, claudeInfo.Usage.BillingUsage.ClaudeUsage.OutputTokens)
+	assert.GreaterOrEqual(t, claudeInfo.Usage.BillingUsage.ClaudeUsage.OutputTokens, 7)
 }
 
 // 输入全部命中缓存（input_tokens=0、缓存读非 0）：这是上游实报，不能再叠一份估算。
