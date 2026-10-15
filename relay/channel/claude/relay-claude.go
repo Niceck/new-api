@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -157,6 +159,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		//上游出错
 	}
 	promptEstimated := false
+	upstreamInput := hasUpstreamInputUsage(claudeInfo.Usage)
 	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
@@ -167,7 +170,8 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
 			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
 		}
-		if claudeInfo.Usage.PromptTokens == 0 {
+		// 上游报了任何输入侧用量（含 input_tokens=0、全部命中缓存）就用上游的，不再叠估算。
+		if !upstreamInput {
 			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
 			promptEstimated = fallback.PromptTokens > 0
 		}
@@ -176,7 +180,8 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"
 	}
-	if claudeInfo.Usage != nil && claudeInfo.Usage.BillingUsage == nil {
+	// 输入是估的就重建计费用量：message_start 只带输出时它已非空，结算优先用它，不重建输入就按 0 计。
+	if claudeInfo.Usage != nil && (claudeInfo.Usage.BillingUsage == nil || promptEstimated) {
 		billingUsage := dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
 		// 没有上游给出的有效用量（没收到用量事件，或收到的全是 0）、输入又是本地估的：标成估算，
 		// 日志记 …-estimated 而不是上游实报（2026-10-14 按估算多扣十倍的几笔都记成了 billing-usage-anthropic）。
@@ -205,6 +210,19 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	}
 }
 
+// hasUpstreamInputUsage：上游是否报过输入侧用量（未缓存输入、缓存读、缓存写任一非 0）。
+func hasUpstreamInputUsage(usage *dto.Usage) bool {
+	if usage == nil {
+		return false
+	}
+	return usage.PromptTokens > 0 ||
+		usage.PromptTokensDetails.CachedTokens > 0 ||
+		usage.PromptTokensDetails.CachedCreationTokens > 0
+}
+
+// clientGoneUsageGrace：客户端在上游出首字前就断开时，最多再等这么久读上游的 message_start（测试里会改短）。
+var clientGoneUsageGrace = 5 * time.Second
+
 func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	claudeInfo := &ClaudeResponseInfo{
 		ResponseId:   helper.GetResponseID(c),
@@ -214,10 +232,16 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	usageSeen := make(chan struct{})
+	var usageSeenOnce sync.Once
+	opts := helper.StreamScannerOptions{UsageSeen: usageSeen, ClientGoneUsageGrace: clientGoneUsageGrace}
+	helper.StreamScannerHandlerWithOptions(c, resp, info, opts, func(data string, sr *helper.StreamResult) {
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
 			sr.Stop(err)
+		}
+		if hasUpstreamInputUsage(claudeInfo.Usage) {
+			usageSeenOnce.Do(func() { close(usageSeen) })
 		}
 	})
 	if err != nil {

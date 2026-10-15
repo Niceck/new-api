@@ -74,7 +74,19 @@ func ExtendWriteDeadline(c *gin.Context) {
 	_ = http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 }
 
+// StreamScannerOptions 是 StreamScannerHandlerWithOptions 的可选行为；零值等于原行为。
+type StreamScannerOptions struct {
+	// UsageSeen 由调用方在拿到上游实报的输入用量后关闭（只关一次）。
+	UsageSeen <-chan struct{}
+	// ClientGoneUsageGrace：客户端已断开而 UsageSeen 还没关时，最多再读这么久上游，等带用量的事件到达。
+	ClientGoneUsageGrace time.Duration
+}
+
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
+	StreamScannerHandlerWithOptions(c, resp, info, StreamScannerOptions{}, dataHandler)
+}
+
+func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, opts StreamScannerOptions, dataHandler func(data string, sr *StreamResult)) {
 
 	if resp == nil || dataHandler == nil {
 		return
@@ -296,9 +308,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case <-stopChan:
 		// EndReason already set by the goroutine that triggered stopChan
 	case <-c.Request.Context().Done():
-		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
-		// 避免为已放弃的请求继续消费上游 token。
+		// 客户端断开：cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
+		// 避免为已放弃的请求继续消费上游 token。先记下断开原因，宽限期里上游的 EOF 不覆盖它。
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		waitUpstreamUsageAfterClientGone(opts, stopChan)
 	}
 
 	cleanup()
@@ -306,5 +319,22 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 	} else {
 		logger.LogError(c, fmt.Sprintf("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
+	}
+}
+
+// waitUpstreamUsageAfterClientGone：调用方登记了 UsageSeen 而上游用量还没到时，再读上游一小段时间。
+// 客户端常在上游回响应头之前就放弃（长上下文首字慢）；此时立即关上游会丢掉紧随其后的用量事件，
+// 只能按本地估算全价计费（2026-10-15 用户 487：上游实报几乎全是缓存读，按估算多扣约 10 倍）。
+// 拿到用量、上游自己结束或宽限期到，三者先到即返回；没登记的调用方立即返回，行为不变。
+func waitUpstreamUsageAfterClientGone(opts StreamScannerOptions, stopChan <-chan bool) {
+	if opts.UsageSeen == nil || opts.ClientGoneUsageGrace <= 0 {
+		return
+	}
+	timer := time.NewTimer(opts.ClientGoneUsageGrace)
+	defer timer.Stop()
+	select {
+	case <-opts.UsageSeen:
+	case <-stopChan:
+	case <-timer.C:
 	}
 }
