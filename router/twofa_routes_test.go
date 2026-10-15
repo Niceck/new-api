@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -17,7 +17,9 @@ import (
 // Each 2FA setup regenerates and bcrypt-hashes four backup codes, so it is
 // limited per IP and per user like the other critical endpoints. The in-memory
 // limiter is shared by the whole test process and never reset, so every run
-// uses addresses and user ids no other run has used.
+// takes its own block of addresses and user ids from a process-wide counter.
+var twoFARouteTestRuns atomic.Int64
+
 func TestTwoFASetupRoute_IsRateLimitedPerIPAndPerUser(t *testing.T) {
 	setupTronRouteAuthTest(t)
 	previousLogDB := model.LOG_DB
@@ -30,13 +32,12 @@ func TestTwoFASetupRoute_IsRateLimitedPerIPAndPerUser(t *testing.T) {
 	engine := gin.New()
 	SetApiRouter(engine)
 
-	run := time.Now().UnixNano()
+	run := twoFARouteTestRuns.Add(1)
 	address := func(index int64) string {
-		n := (run + index) & 0xffffff
-		return fmt.Sprintf("10.%d.%d.%d:1000", (n>>16)&0xff, (n>>8)&0xff, n&0xff)
+		return fmt.Sprintf("10.%d.%d.%d:1000", run>>8&0xff, run&0xff, index)
 	}
 	user := func(index int) string {
-		id := int(run%1_000_000)*10 + 2_000_000 + index
+		id := 2_000_000 + int(run)*10 + index
 		token := fmt.Sprintf("twofa-route-%d", id)
 		require.NoError(t, model.DB.Create(&model.User{Id: id, Username: fmt.Sprintf("twofa-%d", id), Password: "password-placeholder", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AccessToken: &token, AuthVersion: 1, AffCode: fmt.Sprintf("twofa-aff-%d", id)}).Error)
 		return token
