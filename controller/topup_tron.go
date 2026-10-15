@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -168,10 +169,30 @@ func SubmitTronTopupClaim(c *gin.Context) {
 	}
 	ticket, err := operations.SubmitClaim(c.GetInt("id"), request.TradeNo, request.TxID, request.Note)
 	if err != nil {
+		for _, known := range tronClaimErrorMessages {
+			if errors.Is(err, known.err) {
+				common.ApiErrorI18n(c, known.key)
+				return
+			}
+		}
 		common.ApiErrorMsg(c, "充值申诉提交失败")
 		return
 	}
 	common.ApiSuccess(c, newTronClaimReceipt(ticket))
+}
+
+// tronClaimErrorMessages explains the claim failures a claimant can act on.
+// Everything else stays generic: the endpoint must reveal nothing about other
+// users' orders, deposits or tickets.
+var tronClaimErrorMessages = []struct {
+	err error
+	key string
+}{
+	{model.ErrTronClaimDepositNotFound, i18n.MsgTopupTronClaimTxNotFound},
+	{model.ErrTronClaimWindowClosed, i18n.MsgTopupTronClaimWindowClosed},
+	{model.ErrTronClaimLimitReached, i18n.MsgTopupTronClaimLimitReached},
+	{model.ErrTronTxAlreadyClaimed, i18n.MsgTopupTronClaimNotAllowed},
+	{model.ErrTronClaimUserBudgetExceeded, i18n.MsgTopupTronClaimTooFrequent},
 }
 
 // tronClaimReceipt is what a claimant may see of their own ticket. The stored

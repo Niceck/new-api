@@ -124,16 +124,18 @@ const (
 )
 
 var (
-	ErrTronOrderNotFound         = errors.New("TRON top-up order not found")
-	ErrTronTransferMismatch      = errors.New("TRON transfer does not match order")
-	ErrTronTransferPredatesOrder = errors.New("TRON transfer predates order")
-	ErrTronCreditReviewRequired  = errors.New("TRON credit requires manual review")
-	ErrTronTxAlreadyClaimed      = errors.New("TRON transaction is already claimed")
-	ErrTronTicketNotOpen         = errors.New("TRON top-up ticket is not open")
-	ErrTronClaimWindowClosed     = errors.New("TRON top-up claim window is closed")
-	ErrTronClaimLimitReached     = errors.New("TRON top-up claim limit reached")
-	ErrTronDisputeNotResolvable  = errors.New("TRON dispute tickets cannot credit an order")
-	tronModelTxIDPattern         = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
+	ErrTronOrderNotFound           = errors.New("TRON top-up order not found")
+	ErrTronTransferMismatch        = errors.New("TRON transfer does not match order")
+	ErrTronTransferPredatesOrder   = errors.New("TRON transfer predates order")
+	ErrTronCreditReviewRequired    = errors.New("TRON credit requires manual review")
+	ErrTronTxAlreadyClaimed        = errors.New("TRON transaction is already claimed")
+	ErrTronTicketNotOpen           = errors.New("TRON top-up ticket is not open")
+	ErrTronClaimWindowClosed       = errors.New("TRON top-up claim window is closed")
+	ErrTronClaimLimitReached       = errors.New("TRON top-up claim limit reached")
+	ErrTronClaimDepositNotFound    = errors.New("TRON transaction is not in the deposit ledger")
+	ErrTronClaimUserBudgetExceeded = errors.New("TRON claim budget for this user is exhausted")
+	ErrTronDisputeNotResolvable    = errors.New("TRON dispute tickets cannot credit an order")
+	tronModelTxIDPattern           = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 )
 
 func CreateTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
@@ -726,9 +728,15 @@ func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string
 		if nowMS > order.ExpiresAtMS && nowMS-order.ExpiresAtMS > TronClaimGracePeriodMS {
 			return ErrTronClaimWindowClosed
 		}
-		if depositFound {
-			depositID = &deposit.ID
+		// Every confirmed USDT transfer to the receive address is recorded by
+		// the scanner, in the same serialized transaction that decides whether
+		// it settles automatically. A claim may therefore only name a recorded
+		// transaction: an unknown txid opens no ticket, and a claim can never
+		// precede that decision and push the payment into manual review.
+		if !depositFound {
+			return ErrTronClaimDepositNotFound
 		}
+		depositID = &deposit.ID
 
 		var claimCount int64
 		if err := tx.Model(&TronTopupTicket{}).
@@ -738,6 +746,9 @@ func submitTronTopupClaimAt(userID int, tradeNo string, txID string, note string
 		}
 		if claimCount >= tronMaxClaimsPerOrder {
 			return ErrTronClaimLimitReached
+		}
+		if err := checkTronUserTicketBudgetTx(tx, userID, nowMS); err != nil {
+			return err
 		}
 
 		openTicket := TronTopupTicket{}

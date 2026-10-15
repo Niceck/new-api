@@ -330,18 +330,6 @@ func TestTolerantSettle_ThrottledOrderStillBlocksOtherUsers(t *testing.T) {
 	assert.Zero(t, tolQuota(t, 9076))
 }
 
-func TestTolerantSettle_OpenClaimOnTheTransactionForcesManualReview(t *testing.T) {
-	truncateTables(t)
-	order := tolOrder(t, "TOL-claimed", 9080, tolExpectedMicros, tolBaseMS, tolFaceQuota)
-	transfer := tolTransfer(80, tolPaidMicros, tolBaseMS+113_000)
-	_, err := submitTronTopupClaimAt(9080, order.TradeNo, transfer.TxID, "paid via on-ramp", tolBaseMS+150_000)
-	require.NoError(t, err)
-
-	requireTolUnmatched(t, transfer, nil, tronTolerantNoteConflictClaim)
-	assert.Zero(t, tolQuota(t, 9080))
-	assert.Equal(t, common.TopUpStatusPending, tolTopUpStatus(t, order))
-}
-
 func TestTolerantSettle_MultipleInexactPaymentsForOneOrderAllGoManual(t *testing.T) {
 	truncateTables(t)
 	order := tolOrder(t, "TOL-multi", 9090, tolExpectedMicros, tolBaseMS, tolFaceQuota)
@@ -468,6 +456,8 @@ func TestTronSerialLock_EveryLedgerWriteTakesItFirst(t *testing.T) {
 	truncateTables(t)
 	order := tolOrder(t, "TOL-serial-all", 9150, tolExpectedMicros, tolBaseMS, tolFaceQuota)
 	claimed := tolTransfer(150, 14_100_000, tolBaseMS+113_000)
+	_, err := RecordUnmatchedTronDeposit(claimed)
+	require.NoError(t, err)
 	ticket, err := submitTronTopupClaimAt(9150, order.TradeNo, claimed.TxID, "mine", tolBaseMS+200_000)
 	require.NoError(t, err)
 
@@ -519,7 +509,7 @@ func TestTronSerialLock_EveryLedgerWriteTakesItFirst(t *testing.T) {
 	var deposits, orders int64
 	require.NoError(t, DB.Model(&TronDeposit{}).Count(&deposits).Error)
 	require.NoError(t, DB.Model(&TronTopupOrder{}).Count(&orders).Error)
-	assert.Zero(t, deposits)
+	assert.EqualValues(t, 1, deposits, "只剩申诉前记下的那一笔")
 	assert.EqualValues(t, 1, orders)
 }
 

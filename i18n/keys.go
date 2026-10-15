@@ -168,6 +168,12 @@ const (
 	MsgTopupOrderStatus    = "topup.order_status"
 	MsgTopupFailed         = "topup.failed"
 	MsgTopupInvalidQuota   = "topup.invalid_quota"
+
+	MsgTopupTronClaimTxNotFound   = "topup.tron_claim_tx_not_found"
+	MsgTopupTronClaimWindowClosed = "topup.tron_claim_window_closed"
+	MsgTopupTronClaimLimitReached = "topup.tron_claim_limit_reached"
+	MsgTopupTronClaimNotAllowed   = "topup.tron_claim_not_allowed"
+	MsgTopupTronClaimTooFrequent  = "topup.tron_claim_too_frequent"
 )
 
 // Channel related messages

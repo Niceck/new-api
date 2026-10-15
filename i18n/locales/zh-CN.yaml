@@ -149,6 +149,11 @@ topup.order_not_exists: "充值订单不存在"
 topup.order_status: "充值订单状态错误"
 topup.failed: "充值失败，请稍后重试"
 topup.invalid_quota: "无效的充值额度"
+topup.tron_claim_tx_not_found: "暂未在本站收款记录中找到这笔交易。链上到账后通常约 5 分钟可以识别，请稍后再提交；仍找不到时，请核对交易号，并确认是通过 TRON（TRC20）网络向本站收款地址转的 USDT。长时间未识别或申诉期已结束，请联系客服。"
+topup.tron_claim_window_closed: "该订单的自助申诉期已结束，请联系客服。"
+topup.tron_claim_limit_reached: "该订单的申诉提交次数已达上限，请联系客服。"
+topup.tron_claim_not_allowed: "这笔交易无法通过此订单提交申诉，请核对订单或联系客服。"
+topup.tron_claim_too_frequent: "24 小时内最多提交 3 次充值申诉，请稍后再试或联系客服。"
 
 # Channel messages
 channel.not_exists: "渠道不存在"

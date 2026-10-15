@@ -234,6 +234,7 @@ func TestSubmitTronClaim_PreventsCrossUserTxidClaim(t *testing.T) {
 func TestSubmitTronClaim_SupersedesOpenTicketWithImmutableReplacement(t *testing.T) {
 	truncateTables(t)
 	_, order := createTronLedgerFixture(t, "TRON-claim-update", 8303, 5_000_103, 1_800_001_200_000)
+	recordClaimableTronDeposits(t, "1", "2")
 
 	first, err := SubmitTronTopupClaim(order.UserID, order.TradeNo, strings.Repeat("1", 64), "first txid")
 	require.NoError(t, err)
@@ -269,6 +270,7 @@ func TestSubmitTronClaim_RejectsNewClaimAfterReviewWindow(t *testing.T) {
 func TestSubmitTronClaim_AllowsExactReviewDeadlineOnly(t *testing.T) {
 	truncateTables(t)
 	_, order := createTronLedgerFixture(t, "TRON-claim-deadline", 8306, 5_000_106, 1_800_001_200_000)
+	recordClaimableTronDeposits(t, "a", "b")
 	deadlineMS := order.ExpiresAtMS + TronClaimGracePeriodMS
 
 	_, err := submitTronTopupClaimAt(order.UserID, order.TradeNo, strings.Repeat("a", 64), "at deadline", deadlineMS)
@@ -280,6 +282,7 @@ func TestSubmitTronClaim_AllowsExactReviewDeadlineOnly(t *testing.T) {
 func TestSubmitTronClaim_LimitsLifetimeTicketsPerOrder(t *testing.T) {
 	truncateTables(t)
 	_, order := createTronLedgerFixture(t, "TRON-claim-limit", 8305, 5_000_105, 1_800_001_200_000)
+	recordClaimableTronDeposits(t, "4", "5", "6", "7")
 	nowMS := common.GetTimestamp() * 1000
 
 	for index, txChar := range []string{"4", "5", "6"} {
@@ -527,12 +530,15 @@ func TestSettleTronDeposit_SecondPaymentAfterSuccessIsIsolated(t *testing.T) {
 	assert.True(t, replay.AlreadyProcessed)
 }
 
-func TestTronReview_MultipleSourcesPreservedWhenAdminSettlesBeforeScanner(t *testing.T) {
+func TestTronReview_MultipleSourcesPreservedWhenAdminSettlesReviewedDeposit(t *testing.T) {
 	truncateTables(t)
 	_, order := createTronLedgerFixture(t, "TRON-multi-review", 8902, 1_000_123, 1_800_001_200_000)
 	transfer := tronTransfer("c", order.ExpectedAmountMicros, order.CreatedAtMS+1000)
 	transfer.FromAddress = "multiple"
 	transfer.SourceAddresses = `["source-one","source-two"]`
+	// The scanner isolates a multi-source payment for review before anyone can claim it.
+	_, err := RecordReviewTronDeposit(transfer, "multiple_senders")
+	require.NoError(t, err)
 	ticket, err := submitTronTopupClaimAt(order.UserID, order.TradeNo, transfer.TxID, "verified sources", order.CreatedAtMS+2000)
 	require.NoError(t, err)
 	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "all sender ownership verified"))

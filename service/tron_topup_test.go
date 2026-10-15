@@ -308,7 +308,13 @@ func TestTronTopupService_DisabledModeKeepsExistingOrderRecoveryAvailable(t *tes
 	view, err := disabled.GetOrder(9105, order.TradeNo)
 	require.NoError(t, err)
 	assert.Equal(t, order.TradeNo, view.TradeNo)
-	ticket, err := disabled.SubmitClaim(9105, order.TradeNo, "3"+strings.Repeat("0", 63), "recovery while disabled")
+	// 关闭时扫描器不跑：还没记下的交易不能申诉，已经记下的照常可以。
+	_, err = disabled.SubmitClaim(9105, order.TradeNo, "4"+strings.Repeat("0", 63), "not scanned yet")
+	require.ErrorIs(t, err, model.ErrTronClaimDepositNotFound)
+	recorded := model.TronTransferRecord{TxID: "3" + strings.Repeat("0", 63), BlockTimestampMS: now.UnixMilli() - 60_000, FromAddress: "TJmmqjb1DK9TTZbQXzRQ2AuA94z4gKAPFh", ToAddress: validTronTestConfig().ReceiveAddress, TokenContract: tronUSDTContract, AmountMicros: 1_000_000, ObservedAtMS: now.UnixMilli()}
+	_, err = model.RecordUnmatchedTronDeposit(recorded)
+	require.NoError(t, err)
+	ticket, err := disabled.SubmitClaim(9105, order.TradeNo, recorded.TxID, "recovery while disabled")
 	require.NoError(t, err)
 	err = disabled.ResolveTicket(context.Background(), ticket.ID, 1, 1, "must verify chain")
 	assert.ErrorIs(t, err, ErrTronChainVerificationUnavailable)

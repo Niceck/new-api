@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -242,9 +243,10 @@ func TestTronTolerantMySQL_AdminApprovalAndScannerRaceCreditOnce(t *testing.T) {
 	withTronTestMySQL(t, []int{userID}, func() {
 		order := mysqlTolOrder(t, "tol-mysql-approve", userID, 71_000_000, tolBaseMS)
 		transfer := tolTransfer(0x9007, 71_100_000, tolBaseMS+113_000)
-		// 客户在扫描器看到这笔款之前就提交了申诉；管理员通过工单与扫描器的容差判定同时发生。
-		ticket, err := submitTronTopupClaimAt(userID, order.TradeNo, transfer.TxID, "mine", tolBaseMS+150_000)
-		require.NoError(t, err)
+		// v34 以前，客户可以在扫描器看到这笔款之前就提交申诉；这样的历史工单仍可能在升级时开着。
+		// 管理员通过它与扫描器的容差判定同时发生。
+		ticket := &TronTopupTicket{UserID: userID, OrderID: order.ID, ClaimKey: fmt.Sprintf("claim:%d:%d:%s", userID, order.ID, transfer.TxID), TxID: transfer.TxID, Reason: TronTicketReasonUserClaim, Status: TronTicketStatusOpen, UserNote: "mine", CreatedAtMS: tolBaseMS + 150_000, UpdatedAtMS: tolBaseMS + 150_000}
+		require.NoError(t, DB.Create(ticket).Error)
 		t.Cleanup(func() { DB.Where("id = ?", ticket.ID).Delete(&TronTopupTicket{}) })
 
 		var wg, gate sync.WaitGroup
@@ -274,5 +276,86 @@ func TestTronTolerantMySQL_AdminApprovalAndScannerRaceCreditOnce(t *testing.T) {
 		var resolved TronTopupTicket
 		require.NoError(t, DB.First(&resolved, ticket.ID).Error)
 		assert.Equal(t, TronTicketStatusResolved, resolved.Status)
+	})
+}
+
+// A claim racing the scanner either finds no recorded transaction or finds it
+// already classified; it can never turn an automatic credit into manual review.
+func TestTronTolerantMySQL_ClaimRacingScannerCannotPreemptCredit(t *testing.T) {
+	const victimID, attackerID = 940020, 940021
+	withTronTestMySQL(t, []int{victimID, attackerID}, func() {
+		order := mysqlTolOrder(t, "tol-mysql-victim", victimID, 81_000_000, tolBaseMS)
+		// 攻击者的订单金额在另一个档位，本身不会挡住受害者的容差入账。
+		attackerOrder := mysqlTolOrder(t, "tol-mysql-attacker", attackerID, 30_000_000, tolBaseMS)
+		transfer := tolTransfer(0x9020, 81_100_000, tolBaseMS+113_000)
+
+		var wg, gate sync.WaitGroup
+		gate.Add(1)
+		wg.Add(2)
+		var scanErr, claimErr error
+		go func() {
+			defer wg.Done()
+			gate.Wait()
+			_, scanErr = SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+		}()
+		go func() {
+			defer wg.Done()
+			gate.Wait()
+			_, claimErr = submitTronTopupClaimAt(attackerID, attackerOrder.TradeNo, transfer.TxID, "mine", tolBaseMS+120_000)
+		}()
+		gate.Done()
+		wg.Wait()
+
+		require.NoError(t, scanErr)
+		require.Error(t, claimErr, "抢在前面就找不到收款，排在后面就只能对已入账的款申诉")
+		assert.True(t, errors.Is(claimErr, ErrTronClaimDepositNotFound) || errors.Is(claimErr, ErrTronTxAlreadyClaimed), "%v", claimErr)
+		assert.Equal(t, tolFaceQuota, userQuota(t, victimID), "受害者照常自动入账一次")
+		assert.Equal(t, common.TopUpStatusSuccess, tolTopUpStatus(t, order))
+		assert.Zero(t, userQuota(t, attackerID))
+		var open int64
+		require.NoError(t, DB.Model(&TronTopupTicket{}).Where("tx_id = ? AND status = ?", transfer.TxID, TronTicketStatusOpen).Count(&open).Error)
+		assert.Zero(t, open)
+	})
+}
+
+func TestTronClaimBudgetMySQL_ConcurrentClaimsAcrossOrdersStopAtThree(t *testing.T) {
+	const userID = 940030
+	withTronTestMySQL(t, []int{userID}, func() {
+		const callers = 6
+		orders := make([]*TronTopupOrder, callers)
+		transfers := make([]TronTransferRecord, callers)
+		for index := range callers {
+			orders[index] = mysqlTolOrder(t, fmt.Sprintf("budget-mysql-%d", index), userID, 40_000_000+int64(index), tolBaseMS)
+			transfers[index] = tolTransfer(0x9030+index, 41_000_000+int64(index), tolBaseMS+60_000)
+			_, err := RecordUnmatchedTronDeposit(transfers[index])
+			require.NoError(t, err)
+		}
+
+		var wg, gate sync.WaitGroup
+		gate.Add(1)
+		wg.Add(callers)
+		errs := make([]error, callers)
+		for index := range callers {
+			go func() {
+				defer wg.Done()
+				gate.Wait()
+				_, errs[index] = submitTronTopupClaimAt(userID, orders[index].TradeNo, transfers[index].TxID, "claim", tolBaseMS+120_000)
+			}()
+		}
+		gate.Done()
+		wg.Wait()
+
+		succeeded := 0
+		for _, err := range errs {
+			if err == nil {
+				succeeded++
+				continue
+			}
+			require.ErrorIs(t, err, ErrTronClaimUserBudgetExceeded)
+		}
+		assert.Equal(t, 3, succeeded)
+		var opened int64
+		require.NoError(t, DB.Model(&TronTopupTicket{}).Where("user_id = ?", userID).Count(&opened).Error)
+		assert.EqualValues(t, 3, opened)
 	})
 }

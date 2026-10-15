@@ -119,7 +119,8 @@ func SetApiRouter(router *gin.Engine) {
 
 				// 2FA routes
 				selfRoute.GET("/2fa/status", controller.Get2FAStatus)
-				selfRoute.POST("/2fa/setup", middleware.DisableCache(), controller.Setup2FA)
+				// Setup regenerates and bcrypt-hashes four backup codes each time, so it is limited per IP and per user.
+				selfRoute.POST("/2fa/setup", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("2fa-setup"), middleware.DisableCache(), controller.Setup2FA)
 				selfRoute.POST("/2fa/enable", middleware.DisableCache(), controller.Enable2FA)
 				selfRoute.POST("/2fa/disable", middleware.DisableCache(), controller.Disable2FA)
 				selfRoute.POST("/2fa/backup_codes", middleware.DisableCache(), controller.RegenerateBackupCodes)

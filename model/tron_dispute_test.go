@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -203,9 +204,9 @@ func TestTronDispute_EarlierRejectedClaimDoesNotSwallowIt(t *testing.T) {
 	truncateTables(t)
 	orderB := tolLateOrderB(t, "DSP-old-claim-B", 9241)
 	transfer := tolTransfer(240, tolPaidMicros, tolBaseMS+113_000)
-	// B 在扫描器看到这笔款之前就申诉过，被驳回；随后这笔款被容差入账给了 A。
-	oldClaim, err := submitTronTopupClaimAt(9241, orderB.TradeNo, transfer.TxID, "mine", tolBaseMS+120_000)
-	require.NoError(t, err)
+	// B 在扫描器看到这笔款之前就申诉过（v34 以前允许），被驳回；随后这笔款被容差入账给了 A。
+	oldClaim := &TronTopupTicket{UserID: 9241, OrderID: orderB.ID, ClaimKey: fmt.Sprintf("claim:%d:%d:%s", 9241, orderB.ID, transfer.TxID), TxID: transfer.TxID, Reason: TronTicketReasonUserClaim, Status: TronTicketStatusOpen, UserNote: "mine", CreatedAtMS: tolBaseMS + 120_000, UpdatedAtMS: tolBaseMS + 120_000}
+	require.NoError(t, DB.Create(oldClaim).Error)
 	require.NoError(t, RejectTronTopupTicket(oldClaim.ID, 1, "证据不足", tolBaseMS+130_000))
 	tolOrder(t, "DSP-old-claim-A", 9240, tolExpectedMicros, tolBaseMS, tolFaceQuota)
 	settled, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")

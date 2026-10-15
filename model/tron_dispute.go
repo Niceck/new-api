@@ -54,6 +54,9 @@ func openTronDisputeTx(tx *gorm.DB, userID int, order *TronTopupOrder, deposit *
 	if disputeCount >= tronMaxClaimsPerOrder {
 		return nil, ErrTronClaimLimitReached
 	}
+	if err := checkTronUserTicketBudgetTx(tx, userID, nowMS); err != nil {
+		return nil, err
+	}
 	ticket := TronTopupTicket{UserID: userID, OrderID: order.ID, DepositID: &deposit.ID, ClaimKey: claimKey, TxID: deposit.TxID, Reason: TronTicketReasonDispute, Status: TronTicketStatusOpen, UserNote: note, CreatedAtMS: nowMS, UpdatedAtMS: nowMS}
 	if err := tx.Create(&ticket).Error; err != nil {
 		return nil, err

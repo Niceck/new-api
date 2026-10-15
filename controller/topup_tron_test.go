@@ -2,12 +2,14 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -20,6 +22,7 @@ import (
 type stubTronTopupOperations struct {
 	createView      service.TronOrderView
 	createErr       error
+	claimErr        error
 	createUserID    int
 	createAmount    int64
 	createPayCNY    decimal.Decimal
@@ -61,7 +64,7 @@ func (s *stubTronTopupOperations) SubmitClaim(userID int, tradeNo string, txID s
 	s.claimUserID = userID
 	s.claimTradeNo = tradeNo
 	s.claimTxID = txID
-	return s.claimTicket, nil
+	return s.claimTicket, s.claimErr
 }
 
 func (s *stubTronTopupOperations) ResolveTicket(_ context.Context, ticketID int64, orderID int64, resolverID int, note string) error {
@@ -333,5 +336,51 @@ func TestSubmitTronTopupClaim_ReturnsOnlyWhatTheClaimantMaySee(t *testing.T) {
 	assert.Contains(t, response, `"tx_id":"`+strings.Repeat("a", 64)+`"`)
 	for _, leaked := range []string{"credited_user_id", "resolved_order_id", "resolver_id", "admin_note", "internal", "77", "99", "deposit_id", "user_id", "order_id"} {
 		assert.NotContains(t, response, leaked, "申诉响应不得包含 %s", leaked)
+	}
+}
+
+func TestSubmitTronTopupClaim_TellsTheClaimantToWaitForAnUnrecordedTransaction(t *testing.T) {
+	operations := &stubTronTopupOperations{claimErr: model.ErrTronClaimDepositNotFound}
+	withTronControllerDependencies(t, operations)
+
+	body := `{"trade_no":"TRON-order-1","tx_id":"` + strings.Repeat("b", 64) + `","note":"probe"}`
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", body, 42, SubmitTronTopupClaim)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), i18n.MsgTopupTronClaimTxNotFound)
+}
+
+func TestSubmitTronTopupClaim_ExplainsFailuresTheClaimantCanActOn(t *testing.T) {
+	cases := map[error]string{
+		model.ErrTronClaimDepositNotFound:    i18n.MsgTopupTronClaimTxNotFound,
+		model.ErrTronClaimWindowClosed:       i18n.MsgTopupTronClaimWindowClosed,
+		model.ErrTronClaimLimitReached:       i18n.MsgTopupTronClaimLimitReached,
+		model.ErrTronTxAlreadyClaimed:        i18n.MsgTopupTronClaimNotAllowed,
+		model.ErrTronClaimUserBudgetExceeded: i18n.MsgTopupTronClaimTooFrequent,
+	}
+	for err, key := range cases {
+		operations := &stubTronTopupOperations{claimErr: err}
+		withTronControllerDependencies(t, operations)
+
+		body := `{"trade_no":"TRON-order-1","tx_id":"` + strings.Repeat("c", 64) + `","note":""}`
+		recorder := tronHandlerResponse(t, http.MethodPost, "/", body, 42, SubmitTronTopupClaim)
+
+		assert.Contains(t, recorder.Body.String(), `"success":false`, "%v", err)
+		assert.Contains(t, recorder.Body.String(), key, "%v", err)
+	}
+}
+
+func TestSubmitTronTopupClaim_KeepsOtherFailuresGeneric(t *testing.T) {
+	for _, err := range []error{model.ErrTronOrderNotFound, model.ErrTopUpStatusInvalid, errors.New("db down")} {
+		operations := &stubTronTopupOperations{claimErr: err}
+		withTronControllerDependencies(t, operations)
+
+		body := `{"trade_no":"TRON-order-1","tx_id":"` + strings.Repeat("c", 64) + `","note":""}`
+		recorder := tronHandlerResponse(t, http.MethodPost, "/", body, 42, SubmitTronTopupClaim)
+
+		assert.Contains(t, recorder.Body.String(), "充值申诉提交失败", "%v", err)
+		assert.NotContains(t, recorder.Body.String(), "topup.tron_claim", "%v", err)
+		assert.NotContains(t, recorder.Body.String(), "db down", "%v", err)
 	}
 }

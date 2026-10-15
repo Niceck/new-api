@@ -148,6 +148,11 @@ topup.order_not_exists: "Top-up order does not exist"
 topup.order_status: "Top-up order status error"
 topup.failed: "Top-up failed, please try again later"
 topup.invalid_quota: "Invalid top-up quota"
+topup.tron_claim_tx_not_found: "This transaction is not in our deposit records yet. Transfers are usually recognized about 5 minutes after they confirm on chain, so please try again shortly. If it still cannot be found, check the transaction ID and make sure you sent USDT on the TRON (TRC20) network to our receiving address. If it stays unrecognized or the claim period has ended, please contact support."
+topup.tron_claim_window_closed: "The self-service claim period for this order has ended. Please contact support."
+topup.tron_claim_limit_reached: "This order has reached its claim limit. Please contact support."
+topup.tron_claim_not_allowed: "This transaction cannot be claimed through this order. Please check the order or contact support."
+topup.tron_claim_too_frequent: "You can submit at most 3 top-up claims in 24 hours. Please try again later or contact support."
 
 # Channel messages
 channel.not_exists: "Channel does not exist"
