@@ -11,7 +11,12 @@ const (
 )
 
 type GeneralSetting struct {
-	DocsLink            string `json:"docs_link"`
+	DocsLink string `json:"docs_link"`
+	// 对客接口地址（协议 + 主机[:端口]，不带路径与结尾斜杠）。令牌页的「复制服务器地址」、
+	// CC Switch 一键导入、聊天预设里的 {address} 用它；空串时前端退回 ServerAddress。
+	// 和 ServerAddress 分开：ServerAddress 还是支付回调、找回密码链接的地址，换它要连带
+	// 支付平台那边的配置，而对客地址可以按入口规划单独换。写入校验见 ValidateApiBaseURL。
+	ApiBaseURL          string `json:"api_base_url"`
 	PingIntervalEnabled bool   `json:"ping_interval_enabled"`
 	PingIntervalSeconds int    `json:"ping_interval_seconds"`
 	// 当前站点额度展示类型：USD / CNY / TOKENS

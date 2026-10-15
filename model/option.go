@@ -217,12 +217,16 @@ func validateOptionValue(key string, value string) error {
 	if key == groupEntryRejectMessageOptionKey {
 		return operation_setting.ValidateGroupEntryRejectMessage(value)
 	}
+	if key == apiBaseURLOptionKey {
+		return operation_setting.ValidateApiBaseURL(value)
+	}
 	return nil
 }
 
 const (
 	groupEntryHostsOptionKey         = "general_setting.group_entry_hosts"
 	groupEntryRejectMessageOptionKey = "general_setting.group_entry_reject_message"
+	apiBaseURLOptionKey              = "general_setting.api_base_url"
 )
 
 // validateGroupEntryHostsOption 校验 general_setting.group_entry_hosts 的待写入值。

@@ -39,15 +39,21 @@ function getStoredStatusChats(): RawChatConfig {
   }
 }
 
-function extractServerAddress(status: SystemStatus | null) {
-  const fromStatus =
-    (status?.server_address as string | undefined) ??
-    (status?.serverAddress as string | undefined) ??
-    status?.data?.server_address ??
-    (status?.data as Record<string, unknown> | undefined)?.serverAddress
+export function extractServerAddress(status: SystemStatus | null) {
+  const data = status?.data as Record<string, unknown> | undefined
+  // 对客接口地址 api_base_url 优先：server_address 同时是支付回调地址，可能与对客地址不同。
+  // 没设置时后端下发空串，要跳过空串而不是停在它上面。
+  const fromStatus = [
+    status?.api_base_url,
+    data?.api_base_url,
+    status?.server_address,
+    status?.serverAddress,
+    data?.server_address,
+    data?.serverAddress,
+  ].find((value) => typeof value === 'string' && value.trim() !== '')
 
-  if (fromStatus && typeof fromStatus === 'string') {
-    return fromStatus
+  if (typeof fromStatus === 'string') {
+    return fromStatus.trim()
   }
 
   if (typeof window !== 'undefined') {
