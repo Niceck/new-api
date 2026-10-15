@@ -204,3 +204,19 @@ func TestClaudeStreamHandlerClientGoneCacheOnlyInputIsNotEstimated(t *testing.T)
 	require.NotNil(t, usage.BillingUsage)
 	assert.False(t, usage.BillingUsage.Estimated)
 }
+
+// 输入估算为 0（关闭 CountToken 时）、上游没给有效用量、只收到输出文字：快照带上估算的输出，并标成估算。
+func TestHandleStreamFinalResponseOutputOnlyEstimateIsMarked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	claudeInfo := &ClaudeResponseInfo{ResponseText: strings.Builder{}, Usage: &dto.Usage{}}
+	claudeInfo.ResponseText.WriteString("上游没给用量，但已经输出了一些文字")
+
+	HandleStreamFinalResponse(ctx, newFinalResponseTestInfo(0), claudeInfo)
+
+	require.Greater(t, claudeInfo.Usage.CompletionTokens, 0)
+	require.NotNil(t, claudeInfo.Usage.BillingUsage)
+	assert.True(t, claudeInfo.Usage.BillingUsage.Estimated, "估算的输出不能记成上游实报")
+	assert.Equal(t, 0, claudeInfo.Usage.BillingUsage.ClaudeUsage.InputTokens)
+	assert.Equal(t, claudeInfo.Usage.CompletionTokens, claudeInfo.Usage.BillingUsage.ClaudeUsage.OutputTokens)
+}
