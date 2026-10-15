@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -541,6 +542,27 @@ func TestTronReview_MultipleSourcesPreservedWhenAdminSettlesReviewedDeposit(t *t
 	require.NoError(t, err)
 	ticket, err := submitTronTopupClaimAt(order.UserID, order.TradeNo, transfer.TxID, "verified sources", order.CreatedAtMS+2000)
 	require.NoError(t, err)
+	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "all sender ownership verified"))
+	var deposit TronDeposit
+	require.NoError(t, DB.Where("tx_id = ?", transfer.TxID).First(&deposit).Error)
+	assert.Equal(t, transfer.SourceAddresses, deposit.SourceAddresses)
+	result, err := SettleTronDeposit(transfer, "scanner")
+	require.NoError(t, err)
+	assert.True(t, result.AlreadyProcessed)
+	transfer.SourceAddresses = `["different"]`
+	_, err = SettleTronDeposit(transfer, "scanner")
+	require.ErrorIs(t, err, ErrTronTransferMismatch)
+}
+
+func TestTronReview_LegacyTicketMultipleSourcesPreservedWhenAdminSettlesBeforeScanner(t *testing.T) {
+	truncateTables(t)
+	_, order := createTronLedgerFixture(t, "TRON-multi-legacy", 8903, 1_000_124, 1_800_001_200_000)
+	transfer := tronTransfer("e", order.ExpectedAmountMicros, order.CreatedAtMS+1000)
+	transfer.FromAddress = "multiple"
+	transfer.SourceAddresses = `["source-one","source-two"]`
+	// A ticket opened before v34 may name a transaction the scanner has not recorded yet.
+	ticket := &TronTopupTicket{UserID: order.UserID, OrderID: order.ID, ClaimKey: fmt.Sprintf("claim:%d:%d:%s", order.UserID, order.ID, transfer.TxID), TxID: transfer.TxID, Reason: TronTicketReasonUserClaim, Status: TronTicketStatusOpen, UserNote: "verified sources", CreatedAtMS: order.CreatedAtMS + 2000, UpdatedAtMS: order.CreatedAtMS + 2000}
+	require.NoError(t, DB.Create(ticket).Error)
 	require.NoError(t, ResolveTronTopupTicket(ticket.ID, order.ID, transfer, 1, "all sender ownership verified"))
 	var deposit TronDeposit
 	require.NoError(t, DB.Where("tx_id = ?", transfer.TxID).First(&deposit).Error)

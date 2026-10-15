@@ -152,7 +152,7 @@ topup.tron_claim_tx_not_found: "This transaction is not in our deposit records y
 topup.tron_claim_window_closed: "The self-service claim period for this order has ended. Please contact support."
 topup.tron_claim_limit_reached: "This order has reached its claim limit. Please contact support."
 topup.tron_claim_not_allowed: "This transaction cannot be claimed through this order. Please check the order or contact support."
-topup.tron_claim_too_frequent: "You can submit at most 3 top-up claims in 24 hours. Please try again later or contact support."
+topup.tron_claim_too_frequent: "You can open at most 3 top-up claims or disputes in any 24 hours. Please try again later or contact support."
 
 # Channel messages
 channel.not_exists: "Channel does not exist"

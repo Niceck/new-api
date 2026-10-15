@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -383,4 +384,14 @@ func TestSubmitTronTopupClaim_KeepsOtherFailuresGeneric(t *testing.T) {
 		assert.NotContains(t, recorder.Body.String(), "topup.tron_claim", "%v", err)
 		assert.NotContains(t, recorder.Body.String(), "db down", "%v", err)
 	}
+}
+
+func TestSubmitTronTopupClaim_MapsWrappedFailures(t *testing.T) {
+	operations := &stubTronTopupOperations{claimErr: fmt.Errorf("submit claim: %w", model.ErrTronClaimUserBudgetExceeded)}
+	withTronControllerDependencies(t, operations)
+
+	body := `{"trade_no":"TRON-order-1","tx_id":"` + strings.Repeat("d", 64) + `","note":""}`
+	recorder := tronHandlerResponse(t, http.MethodPost, "/", body, 42, SubmitTronTopupClaim)
+
+	assert.Contains(t, recorder.Body.String(), i18n.MsgTopupTronClaimTooFrequent)
 }

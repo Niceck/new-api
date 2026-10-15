@@ -84,3 +84,43 @@ func TestTronClaimBudget_SystemTicketsDoNotCount(t *testing.T) {
 	_, err := submitTronTopupClaimAt(9320, order.TradeNo, recordTolDeposit(t, 321).TxID, "mine", t0+1)
 	require.NoError(t, err)
 }
+
+func TestTronClaimBudget_RefusedCorrectionLeavesTheOpenClaimUntouched(t *testing.T) {
+	truncateTables(t)
+	first := tolOrder(t, "BUDGET-fix-1", 9330, 50_000_000, tolBaseMS, tolFaceQuota)
+	second := tolOrder(t, "BUDGET-fix-2", 9330, 50_000_001, tolBaseMS+1, tolFaceQuota)
+	deposits := []TronTransferRecord{recordTolDeposit(t, 331), recordTolDeposit(t, 332), recordTolDeposit(t, 333), recordTolDeposit(t, 334)}
+	t0 := tolBaseMS + 10*60*1000
+	open, err := submitTronTopupClaimAt(9330, first.TradeNo, deposits[0].TxID, "one", t0)
+	require.NoError(t, err)
+	for index, deposit := range deposits[1:3] {
+		_, err = submitTronTopupClaimAt(9330, second.TradeNo, deposit.TxID, "other order", t0+1+int64(index))
+		require.NoError(t, err)
+	}
+
+	_, err = submitTronTopupClaimAt(9330, first.TradeNo, deposits[3].TxID, "correction", t0+10)
+	require.ErrorIs(t, err, ErrTronClaimUserBudgetExceeded)
+	var kept TronTopupTicket
+	require.NoError(t, DB.First(&kept, open.ID).Error)
+	assert.Equal(t, TronTicketStatusOpen, kept.Status)
+	assert.Equal(t, open.UpdatedAtMS, kept.UpdatedAtMS)
+	assert.Empty(t, kept.AdminNote)
+}
+
+func TestTronClaimBudget_WindowIsExactlyTwentyFourHours(t *testing.T) {
+	truncateTables(t)
+	earlier := tolOrder(t, "BUDGET-edge-earlier", 9340, 50_000_001, tolBaseMS, tolFaceQuota)
+	order := tolOrder(t, "BUDGET-edge", 9340, 50_000_000, tolBaseMS, tolFaceQuota)
+	t0 := tolBaseMS + 10*60*1000
+	// 放在另一张订单上：本单的三次机会不受影响，只看跨订单的每日上限。
+	for index := range 3 {
+		require.NoError(t, DB.Create(&TronTopupTicket{UserID: 9340, OrderID: earlier.ID, ClaimKey: fmt.Sprintf("edge:%d", index), TxID: fmt.Sprintf("%064x", 340+index), Reason: TronTicketReasonUserClaim, Status: TronTicketStatusRejected, CreatedAtMS: t0, UpdatedAtMS: t0}).Error)
+	}
+	deposit := recordTolDeposit(t, 345)
+	day := int64(24 * 60 * 60 * 1000)
+
+	_, err := submitTronTopupClaimAt(9340, order.TradeNo, deposit.TxID, "one ms early", t0+day-1)
+	require.ErrorIs(t, err, ErrTronClaimUserBudgetExceeded, "已驳回的工单照样计数")
+	_, err = submitTronTopupClaimAt(9340, order.TradeNo, deposit.TxID, "exactly a day", t0+day)
+	require.NoError(t, err)
+}

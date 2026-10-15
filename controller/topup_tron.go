@@ -182,8 +182,8 @@ func SubmitTronTopupClaim(c *gin.Context) {
 }
 
 // tronClaimErrorMessages explains the claim failures a claimant can act on.
-// Everything else stays generic: the endpoint must reveal nothing about other
-// users' orders, deposits or tickets.
+// Everything else stays generic. None of these name another user, their order,
+// the amount credited or how a ticket was handled.
 var tronClaimErrorMessages = []struct {
 	err error
 	key string
