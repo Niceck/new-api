@@ -20,13 +20,19 @@ const (
 	TronMatchModeTolerant = "tolerant"
 	TronMatchModeManual   = "manual"
 
-	tronTolerantRuleVersion = "v1"
+	// v2 (2026-10-18): another user's order that one exact payment settled stops
+	// blocking tronTolerantPaidExactBlockMS after it was credited.
+	tronTolerantRuleVersion = "v2"
 	// An order must exist this long before the block, so nobody can create a
 	// matching order after seeing someone else's broadcast transaction.
 	tronTolerantMinLeadMS int64 = 60 * 1000
 	// Another user's order keeps blocking this long after it expires: the money
 	// could still be theirs, paid late. Outside the window it is an accepted risk.
 	tronTolerantBlockerGraceMS int64 = 2 * 60 * 60 * 1000
+	// An order paid off by one exact payment keeps blocking only this long after
+	// the credit: its owner sees the credit when it lands, so a mistaken second
+	// payment comes before that or soon after. Later is an accepted risk.
+	tronTolerantPaidExactBlockMS int64 = 2 * 60 * 1000
 	// Only a user's first few orders in a rolling day may settle by tolerance,
 	// so a standing order cannot wait around for other people's mispayments.
 	tronTolerantThrottleWindowMS int64 = 24 * 60 * 60 * 1000
@@ -262,7 +268,11 @@ func selectTronTolerantOrder(tx *gorm.DB, transfer TronTransferRecord, peers []T
 	if err != nil {
 		return tronTolerantSelection{}, err
 	}
-	candidate, quota, note := pickTronTolerantCandidate(transfer, plausible, topUps)
+	paidOff, err := loadTronPaidOffOrders(tx, transfer, plausible, topUps)
+	if err != nil {
+		return tronTolerantSelection{}, err
+	}
+	candidate, quota, note := pickTronTolerantCandidate(transfer, plausible, topUps, paidOff)
 	if candidate == nil {
 		return tronTolerantSelection{note: note}, nil
 	}
@@ -297,9 +307,10 @@ func tronTolerantPrecheck(tx *gorm.DB, transfer TronTransferRecord) (string, err
 // pickTronTolerantCandidate chooses among the plausible orders without
 // touching the database. An order is live when it is pending, was paid before
 // it expired and existed long enough before the block. Exactly one live order
-// may remain, no other user may have any plausible order, and the same user's
-// other plausible orders must all settle to the identical credit.
-func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopupOrder, topUps map[int]TopUp) (*TronTopupOrder, int, string) {
+// may remain, no other user may have any plausible order except one in
+// paidOff, and the same user's other plausible orders must all settle to the
+// identical credit.
+func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopupOrder, topUps map[int]TopUp, paidOff map[int64]bool) (*TronTopupOrder, int, string) {
 	var live []*TronTopupOrder
 	tooEarly := false
 	for i := range plausible {
@@ -323,7 +334,7 @@ func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopu
 	}
 	candidate := live[0]
 	for i := range plausible {
-		if plausible[i].UserID != candidate.UserID {
+		if plausible[i].UserID != candidate.UserID && !paidOff[plausible[i].ID] {
 			return nil, 0, tronTolerantNoteBlockedOtherUser
 		}
 	}
@@ -394,7 +405,8 @@ func tronTopUpMatchesOrder(topUp TopUp, order *TronTopupOrder) bool {
 // transfer could plausibly have been meant for: same address and token, the
 // block no later than the blocker grace after expiry, and the amount within
 // policy. A paid or closed order stays in the set, because its owner may have
-// paid a second time by mistake.
+// paid a second time by mistake; loadTronPaidOffOrders says which paid ones
+// are past that risk.
 func loadTronPlausibleOrders(tx *gorm.DB, transfer TronTransferRecord) ([]TronTopupOrder, map[int]TopUp, error) {
 	low, high, ok := tronPlausibleExpectedBounds(transfer.AmountMicros)
 	if !ok {
