@@ -218,10 +218,10 @@ func TestTolerantSettle_RequiresPaymentBeforeExpiry(t *testing.T) {
 	assert.True(t, result.Credited)
 }
 
-func TestTolerantSettle_OtherUsersOrderBlocksWithinTwoHoursAfterExpiry(t *testing.T) {
+func TestTolerantSettle_OtherUsersOrderBlocksUntilTheBlockerGraceAfterExpiry(t *testing.T) {
 	truncateTables(t)
 	blockTime := tolBaseMS + 10*60*60*1000
-	// 另一个用户的同档弃单：过期后恰好 2 小时仍算「这笔钱也可能是他的」。
+	// 另一个用户的同档弃单：过期后恰好一个阻断窗口（v3 起 10 分钟）仍算「这笔钱也可能是他的」。
 	tolOrder(t, "TOL-other-edge", 9040, 14_951_184, blockTime-tolTTLMS-tronTolerantBlockerGraceMS, tolFaceQuota)
 	tolOrder(t, "TOL-mine-blocked", 9041, tolExpectedMicros, blockTime-113_000, tolFaceQuota)
 	requireTolUnmatched(t, tolTransfer(40, tolPaidMicros, blockTime), nil, tronTolerantNoteBlockedOtherUser)
@@ -229,7 +229,7 @@ func TestTolerantSettle_OtherUsersOrderBlocksWithinTwoHoursAfterExpiry(t *testin
 	assert.Zero(t, tolQuota(t, 9040))
 
 	truncateTablesNow(t)
-	// 过期超过 2 小时 1 毫秒：不再阻断（这是站长接受的窗口外风险）。
+	// 过期超过阻断窗口 1 毫秒：不再阻断（这是站长接受的窗口外风险）。
 	tolOrder(t, "TOL-other-out", 9042, 14_951_184, blockTime-tolTTLMS-tronTolerantBlockerGraceMS-1, tolFaceQuota)
 	mine := tolOrder(t, "TOL-mine-ok", 9043, tolExpectedMicros, blockTime-113_000, tolFaceQuota)
 	result, err := SettleTronDepositTolerant(tolTransfer(41, tolPaidMicros, blockTime), nil, "tron-scanner")

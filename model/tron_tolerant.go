@@ -22,13 +22,23 @@ const (
 
 	// v2 (2026-10-18): another user's order that one exact payment settled stops
 	// blocking tronTolerantPaidExactBlockMS after it was credited.
-	tronTolerantRuleVersion = "v2"
+	// v3 (2026-10-18): another user's order blocks only until
+	// tronTolerantBlockerGraceMS after it expires (10 minutes, was 2 hours).
+	tronTolerantRuleVersion = "v3"
 	// An order must exist this long before the block, so nobody can create a
 	// matching order after seeing someone else's broadcast transaction.
 	tronTolerantMinLeadMS int64 = 60 * 1000
+	// An order stays a plausible target of a transfer whose block is no later
+	// than this long after the order expires. The same user's plausible orders
+	// must all settle to the identical credit, and another inexact payment in
+	// that range for the chosen order sends both to review.
+	tronTolerantPlausibleGraceMS int64 = 2 * 60 * 60 * 1000
 	// Another user's order keeps blocking this long after it expires: the money
-	// could still be theirs, paid late. Outside the window it is an accepted risk.
-	tronTolerantBlockerGraceMS int64 = 2 * 60 * 60 * 1000
+	// could still be theirs, paid late. Outside the window it is an accepted risk:
+	// such a late inexact payment can be taken by someone else's live order, and
+	// its owner's claim then opens a dispute. Ten minutes since v3; before, it was
+	// the whole plausible grace.
+	tronTolerantBlockerGraceMS int64 = 10 * 60 * 1000
 	// An order paid off by one exact payment keeps blocking only this long after
 	// the credit: its owner sees the credit when it lands, so a mistaken second
 	// payment comes before that or soon after. Later is an accepted risk.
@@ -307,9 +317,9 @@ func tronTolerantPrecheck(tx *gorm.DB, transfer TronTransferRecord) (string, err
 // pickTronTolerantCandidate chooses among the plausible orders without
 // touching the database. An order is live when it is pending, was paid before
 // it expired and existed long enough before the block. Exactly one live order
-// may remain, no other user may have any plausible order except one in
-// paidOff, and the same user's other plausible orders must all settle to the
-// identical credit.
+// may remain, no other user may have an order that still counts against it
+// (tronTolerantOrderCounts) except one in paidOff, and every other order that
+// still counts must settle to the identical credit.
 func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopupOrder, topUps map[int]TopUp, paidOff map[int64]bool) (*TronTopupOrder, int, string) {
 	var live []*TronTopupOrder
 	tooEarly := false
@@ -334,7 +344,8 @@ func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopu
 	}
 	candidate := live[0]
 	for i := range plausible {
-		if plausible[i].UserID != candidate.UserID && !paidOff[plausible[i].ID] {
+		other := &plausible[i]
+		if other.UserID != candidate.UserID && tronTolerantOrderCounts(transfer, candidate, other) && !paidOff[other.ID] {
 			return nil, 0, tronTolerantNoteBlockedOtherUser
 		}
 	}
@@ -347,7 +358,7 @@ func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopu
 	}
 	for i := range plausible {
 		other := &plausible[i]
-		if other.ID == candidate.ID {
+		if other.ID == candidate.ID || !tronTolerantOrderCounts(transfer, candidate, other) {
 			continue
 		}
 		otherQuota, err := tronSettlementQuota(other.ExpectedAmountMicros, transfer.AmountMicros, other.CreditQuota)
@@ -356,6 +367,15 @@ func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopu
 		}
 	}
 	return candidate, quota, ""
+}
+
+// tronTolerantOrderCounts reports whether a plausible order still bears on a
+// tolerant credit to candidate: the same user's orders count for the whole
+// plausible grace, another user's only until tronTolerantBlockerGraceMS after
+// it expired. The plausible query keeps the order's expiry within the
+// plausible grace of the block, so the difference cannot overflow.
+func tronTolerantOrderCounts(transfer TronTransferRecord, candidate, order *TronTopupOrder) bool {
+	return order.UserID == candidate.UserID || transfer.BlockTimestampMS-order.ExpiresAtMS <= tronTolerantBlockerGraceMS
 }
 
 // tronTolerantCandidateBlocked applies the checks that need the ledger: the
@@ -403,7 +423,7 @@ func tronTopUpMatchesOrder(topUp TopUp, order *TronTopupOrder) bool {
 
 // loadTronPlausibleOrders returns every order, whatever its state, that this
 // transfer could plausibly have been meant for: same address and token, the
-// block no later than the blocker grace after expiry, and the amount within
+// block no later than the plausible grace after expiry, and the amount within
 // policy. A paid or closed order stays in the set, because its owner may have
 // paid a second time by mistake; loadTronPaidOffOrders says which paid ones
 // are past that risk.
@@ -415,7 +435,7 @@ func loadTronPlausibleOrders(tx *gorm.DB, transfer TronTransferRecord) ([]TronTo
 	var candidates []TronTopupOrder
 	if err := tx.
 		Where("receive_address = ? AND token_contract = ?", transfer.ToAddress, transfer.TokenContract).
-		Where("created_at_ms <= ? AND expires_at_ms >= ?", transfer.BlockTimestampMS, transfer.BlockTimestampMS-tronTolerantBlockerGraceMS).
+		Where("created_at_ms <= ? AND expires_at_ms >= ?", transfer.BlockTimestampMS, transfer.BlockTimestampMS-tronTolerantPlausibleGraceMS).
 		Where("expected_amount_micros >= ? AND expected_amount_micros <= ?", low, high).
 		Order("id ASC").
 		Find(&candidates).Error; err != nil {
@@ -450,7 +470,7 @@ func loadTronPlausibleOrders(tx *gorm.DB, transfer TronTransferRecord) ([]TronTo
 // the order of traversal must not decide who gets the order.
 func tronTolerantDepositConflict(tx *gorm.DB, transfer TronTransferRecord, candidate *TronTopupOrder, peers []TronTransferRecord) (bool, error) {
 	fromMS := candidate.CreatedAtMS
-	toMS := candidate.ExpiresAtMS + tronTolerantBlockerGraceMS
+	toMS := candidate.ExpiresAtMS + tronTolerantPlausibleGraceMS
 	var rivals []TronDeposit
 	if err := tx.
 		Where("tx_id <> ? AND to_address = ? AND token_contract = ?", transfer.TxID, transfer.ToAddress, transfer.TokenContract).

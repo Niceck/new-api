@@ -24,7 +24,7 @@ func TestTronDispute_OtherUsersClaimOnCreditedTransactionOpensDispute(t *testing
 	truncateTables(t)
 	_, transfer := tolCreditedToUserA(t)
 	// 用户 B 在这笔款入账之后才下的单会早于付款时间吗？不会——所以让 B 的单建在付款之前，
-	// 但晚于阻断窗口（过期超过 2 小时）而仍在 24 小时申诉期内：这正是会被错归属的那类迟到款。
+	// 但晚于阻断窗口（v3 起是过期超过 10 分钟）而仍在 24 小时申诉期内：这正是会被错归属的那类迟到款。
 	orderB := tolOrder(t, "DSP-B", 9202, 14_951_184, tolBaseMS-tolTTLMS-tronTolerantBlockerGraceMS-60_000, tolFaceQuota)
 	claimAt := tolBaseMS + 30*60*1000
 
@@ -194,7 +194,7 @@ func TestTronSettlementView_ReportsWhatActuallyArrivedAndWasCredited(t *testing.
 	assert.Zero(t, unpaid.TronCreditedQuota)
 }
 
-// 用户 B 的订单：过期超过 2 小时（不阻断别人的容差入账），但仍在 24 小时申诉期内。
+// 用户 B 的订单：过期超过阻断窗口（v3 起 10 分钟，不阻断别人的容差入账），但仍在 24 小时申诉期内。
 func tolLateOrderB(t *testing.T, tradeNo string, userID int) *TronTopupOrder {
 	t.Helper()
 	return tolOrder(t, tradeNo, userID, 14_951_184, tolBaseMS-tolTTLMS-tronTolerantBlockerGraceMS-60_000, tolFaceQuota)

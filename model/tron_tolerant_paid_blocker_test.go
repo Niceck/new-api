@@ -11,7 +11,8 @@ import (
 )
 
 // 规则 v2（站长 2026-10-18 定）：别人的订单若已被一笔精确金额的款付清，只在系统确认到账后
-// 2 分钟内挡住别人的容差入账；之后不再挡。其余情形照 v1 挡满「创建～到期后 2 小时」。
+// 2 分钟内挡住别人的容差入账；之后不再挡。其余情形挡满别人的订单的阻断窗口：v1/v2 是
+// 「创建～到期后 2 小时」，v3 起是「创建～到期后 10 分钟」（见 tron_tolerant_blocker_grace_test.go）。
 const (
 	pbPaidBlockMS int64 = 2 * 60 * 1000
 	// 2026-10-18 真实事件：用户 528 的订单 21 精确付清约一小时后，用户 531 的订单 22 多付 3.4%。
@@ -24,6 +25,9 @@ const (
 	// 订单 22 在订单 21 建单后 3714.912 秒创建，再过 239.493 秒上链。
 	pbMineCreatedAfterMS int64 = 3_714_912
 	pbMineBlockLeadMS    int64 = 239_493
+	// v3 起别人的订单只在到期后 10 分钟内挡。「照旧挡满窗口」的用例让我的单在别人建单后 21 分钟
+	// 创建、再过 239.493 秒上链：别人的单已到期 5 分钟，仍在窗口内，也早过了它确认到账后 2 分钟。
+	pbMineInWindowCreatedAfterMS int64 = 21 * 60 * 1000
 )
 
 // pbPayExact pays the order its exact amount at blockMS; the scanner credits it at creditMS.
@@ -48,6 +52,18 @@ func pbMineAnHourLater(t *testing.T, tradeNo string, userID int, seq int) (*Tron
 	return order, tolTransfer(seq, pbMinePaid, created+pbMineBlockLeadMS)
 }
 
+// pbMineInWindow creates the paying user's order 21 minutes after a blocker
+// created at tolBaseMS, so the 3.4%-over payment lands 5 minutes after the
+// blocker expired: inside the window in which another user's order blocks.
+func pbMineInWindow(t *testing.T, tradeNo string, userID int, seq int) (*TronTopupOrder, TronTransferRecord) {
+	t.Helper()
+	created := tolBaseMS + pbMineInWindowCreatedAfterMS
+	block := created + pbMineBlockLeadMS
+	require.LessOrEqual(t, block-(tolBaseMS+tolTTLMS), tronTolerantBlockerGraceMS, "必须落在别人那张单的阻断窗口内")
+	order := tolOrder(t, tradeNo, userID, pbMineExpected, created, tolFaceQuota)
+	return order, tolTransfer(seq, pbMinePaid, block)
+}
+
 func TestTolerantSettle_PaidExactOrderStopsBlockingAfterItsCredit_RealEvent(t *testing.T) {
 	truncateTables(t)
 	blocker := tolOrder(t, "PB-528", 9400, pbBlockerExpected, tolBaseMS, tolFaceQuota)
@@ -56,6 +72,7 @@ func TestTolerantSettle_PaidExactOrderStopsBlockingAfterItsCredit_RealEvent(t *t
 
 	result, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
 	require.NoError(t, err)
+	// v3 起订单 21 早已出了阻断窗口（到期后 10 分钟）；v2 时靠的是「已精确付清」的豁免。
 	assert.True(t, result.Credited, "别人一小时前就精确付清了，这笔不再被他的订单挡住")
 	assert.Equal(t, mine.ID, result.OrderID)
 	assert.Equal(t, tolFaceQuota, tolQuota(t, 9401), "多付按订单面值入账")
@@ -63,7 +80,22 @@ func TestTolerantSettle_PaidExactOrderStopsBlockingAfterItsCredit_RealEvent(t *t
 	assert.Equal(t, common.TopUpStatusSuccess, tolTopUpStatus(t, mine))
 	deposit := tolDeposit(t, transfer)
 	assert.Equal(t, TronMatchModeTolerant, deposit.MatchMode)
-	assert.Equal(t, "v2", deposit.MatchRule, "按新规则判定的款要记新版本号")
+	assert.Equal(t, "v3", deposit.MatchRule, "按新规则判定的款要记新版本号")
+}
+
+func TestTolerantSettle_PaidExactOrderStopsBlockingInsideTheWindow(t *testing.T) {
+	truncateTables(t)
+	// 同样的付清，换到窗口之内：我的款在他的单到期 5 分钟后上链，靠「已精确付清」的豁免入账。
+	blocker := tolOrder(t, "PB-in-528", 9405, pbBlockerExpected, tolBaseMS, tolFaceQuota)
+	pbPayExact(t, blocker, 405, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
+	mine, transfer := pbMineInWindow(t, "PB-in-531", 9406, 406)
+
+	result, err := SettleTronDepositTolerant(transfer, nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.Credited)
+	assert.Equal(t, mine.ID, result.OrderID)
+	assert.Equal(t, tolFaceQuota, tolQuota(t, 9406))
+	assert.Equal(t, tolFaceQuota, tolQuota(t, 9405), "别人的余额只有他自己那一笔")
 }
 
 func TestTolerantSettle_PaidExactOrderBlocksForTwoMinutesAfterItsCredit(t *testing.T) {
@@ -104,7 +136,7 @@ func TestTolerantSettle_OrderPaidByToleranceKeepsBlockingTheFullWindow(t *testin
 	require.True(t, first.Credited)
 	require.Equal(t, blocker.ID, first.OrderID)
 
-	_, transfer := pbMineAnHourLater(t, "PB-tol-mine", 9421, 421)
+	_, transfer := pbMineInWindow(t, "PB-tol-mine", 9421, 421)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9421))
 }
@@ -121,7 +153,7 @@ func TestTolerantSettle_OrderPaidThroughATicketKeepsBlockingTheFullWindow(t *tes
 	require.NoError(t, ResolveTronTopupTicket(ticket.ID, blocker.ID, claimed, 1, "verified"))
 	require.Equal(t, common.TopUpStatusSuccess, tolTopUpStatus(t, blocker))
 
-	_, transfer := pbMineAnHourLater(t, "PB-man-mine", 9431, 431)
+	_, transfer := pbMineInWindow(t, "PB-man-mine", 9431, 431)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9431))
 }
@@ -140,7 +172,7 @@ func TestTolerantSettle_LateExactPaymentApprovedThroughATicketKeepsBlocking(t *t
 	require.Equal(t, common.TopUpStatusSuccess, tolTopUpStatus(t, blocker))
 	require.Equal(t, TronMatchModeManual, tolDeposit(t, late).MatchMode)
 
-	_, transfer := pbMineAnHourLater(t, "PB-late-mine", 9436, 436)
+	_, transfer := pbMineInWindow(t, "PB-late-mine", 9436, 436)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9436))
 }
@@ -156,7 +188,7 @@ func TestTolerantSettle_PaidExactOrderPaidTwiceKeepsBlocking(t *testing.T) {
 	require.True(t, dup.NeedsReview)
 	require.Nil(t, tolDeposit(t, tolTransfer(441, pbBlockerExpected, tolBaseMS+600_000)).OrderID)
 
-	_, transfer := pbMineAnHourLater(t, "PB-dup-mine", 9441, 442)
+	_, transfer := pbMineInWindow(t, "PB-dup-mine", 9441, 442)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9441))
 }
@@ -172,7 +204,7 @@ func TestTolerantSettle_PaidExactOrderWithAnOpenTicketKeepsBlocking(t *testing.T
 	require.NoError(t, err)
 	pbPayExact(t, blocker, 451, tolBaseMS+90_000, tolBaseMS+290_000)
 
-	_, transfer := pbMineAnHourLater(t, "PB-tkt-mine", 9451, 452)
+	_, transfer := pbMineInWindow(t, "PB-tkt-mine", 9451, 452)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9451))
 }
@@ -195,8 +227,8 @@ func TestTolerantSettle_PaidExactOrderWhosePaymentIsDisputedKeepsBlocking(t *tes
 			require.NoError(t, err)
 			require.Equal(t, TronTicketReasonDispute, ticket.Reason)
 		}
-		// 我的单在别人建单后 1 小时 55 分：仍在他那张单的阻断窗口内，已出了争议方那张单的窗口。
-		mineCreated := tolBaseMS + 115*60*1000
+		// 我的单在别人建单后 21 分钟：仍在他那张单到期后 10 分钟的阻断窗口内，已出了争议方那张单的窗口。
+		mineCreated := tolBaseMS + pbMineInWindowCreatedAfterMS
 		tolOrder(t, "PB-dsp-mine", 9491, pbMineExpected, mineCreated, tolFaceQuota)
 		return tolTransfer(491, pbMinePaid, mineCreated+pbMineBlockLeadMS)
 	}
@@ -216,7 +248,7 @@ func TestTolerantSettle_PaidExactOrderWithoutCreditTimeKeepsBlocking(t *testing.
 	pbPayExact(t, blocker, 460, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
 	require.NoError(t, DB.Model(&TronTopupOrder{}).Where("id = ?", blocker.ID).Update("completed_at_ms", 0).Error)
 
-	_, transfer := pbMineAnHourLater(t, "PB-nots-mine", 9461, 461)
+	_, transfer := pbMineInWindow(t, "PB-nots-mine", 9461, 461)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 }
 
@@ -227,7 +259,7 @@ func TestTolerantSettle_PaidExactOrderWithAnAbsurdCreditTimeKeepsBlocking(t *tes
 	pbPayExact(t, blocker, 500, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
 	require.NoError(t, DB.Model(&TronTopupOrder{}).Where("id = ?", blocker.ID).Update("completed_at_ms", int64(math.MaxInt64)).Error)
 
-	_, transfer := pbMineAnHourLater(t, "PB-ovf-mine", 9501, 501)
+	_, transfer := pbMineInWindow(t, "PB-ovf-mine", 9501, 501)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9501))
 }
@@ -235,11 +267,11 @@ func TestTolerantSettle_PaidExactOrderWithAnAbsurdCreditTimeKeepsBlocking(t *tes
 func TestTolerantSettle_PaidExactOrderFoundLateBlocksUntilTwoMinutesAfterThatCredit(t *testing.T) {
 	truncateTables(t)
 	// 每小时的宽对账晚了 3 小时才扫到别人的精确款，完成时间就是扫到的时间。
-	// 在那之前上链的不精确款，哪怕比那笔精确款晚一个多小时，也照旧挡。
+	// 在那之前上链的不精确款（这里比那笔精确款晚二十多分钟，还在他那张单的阻断窗口内）照旧挡。
 	blocker := tolOrder(t, "PB-recon-other", 9510, pbBlockerExpected, tolBaseMS, tolFaceQuota)
 	pbPayExact(t, blocker, 510, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+3*60*60*1000)
 
-	_, transfer := pbMineAnHourLater(t, "PB-recon-mine", 9511, 511)
+	_, transfer := pbMineInWindow(t, "PB-recon-mine", 9511, 511)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9511))
 }
@@ -251,7 +283,7 @@ func TestTolerantSettle_ExactCreditWithoutMatchModeKeepsBlocking(t *testing.T) {
 	pbPayExact(t, blocker, 520, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
 	require.NoError(t, DB.Model(&TronDeposit{}).Where("order_id = ?", blocker.ID).Update("match_mode", "").Error)
 
-	_, transfer := pbMineAnHourLater(t, "PB-nomode-mine", 9521, 521)
+	_, transfer := pbMineInWindow(t, "PB-nomode-mine", 9521, 521)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 }
 
@@ -263,7 +295,7 @@ func TestTolerantSettle_SameAmountPaidElsewhereStillCountsAgainstThePaidOrder(t 
 	elsewhere := TronDeposit{TxID: fmt.Sprintf("%064x", 531), BlockTimestampMS: tolBaseMS + 600_000, FromAddress: "TJmmqjb1DK9TTZbQXzRQ2AuA94z4gKAPFh", ToAddress: "TLsV52sRDL79HXGGm9yzwKibb6BeruhUzy", TokenContract: testTronUSDTContract, AmountMicros: pbBlockerExpected, Status: TronDepositStatusUnmatched, ObservedAtMS: tolBaseMS + 800_000}
 	require.NoError(t, DB.Create(&elsewhere).Error)
 
-	_, transfer := pbMineAnHourLater(t, "PB-addr-mine", 9531, 532)
+	_, transfer := pbMineInWindow(t, "PB-addr-mine", 9531, 532)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 }
 
@@ -272,8 +304,8 @@ func TestTolerantSettle_OnlyThePaidOffOrderStopsBlocking(t *testing.T) {
 	paid := tolOrder(t, "PB-mix-paid", 9470, pbBlockerExpected, tolBaseMS, tolFaceQuota)
 	pbPayExact(t, paid, 470, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
 	// 第三个人还挂着一张没付的同档单：它照旧挡。
-	tolOrder(t, "PB-mix-pending", 9472, 14_960_500, tolBaseMS+pbMineCreatedAfterMS-5*60*1000, tolFaceQuota)
-	_, transfer := pbMineAnHourLater(t, "PB-mix-mine", 9471, 471)
+	tolOrder(t, "PB-mix-pending", 9472, 14_960_500, tolBaseMS+pbMineInWindowCreatedAfterMS-5*60*1000, tolFaceQuota)
+	_, transfer := pbMineInWindow(t, "PB-mix-mine", 9471, 471)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 	assert.Zero(t, tolQuota(t, 9471))
 	assert.Zero(t, tolQuota(t, 9472))
@@ -285,5 +317,5 @@ func TestTolerantSettle_UnmatchedDepositsRecordTheRuleVersion(t *testing.T) {
 	tolOrder(t, "PB-ver-mine", 9481, tolExpectedMicros, tolBaseMS, tolFaceQuota)
 	transfer := tolTransfer(480, tolPaidMicros, tolBaseMS+113_000)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
-	assert.Equal(t, "v2", tolDeposit(t, transfer).MatchRule)
+	assert.Equal(t, "v3", tolDeposit(t, transfer).MatchRule)
 }
