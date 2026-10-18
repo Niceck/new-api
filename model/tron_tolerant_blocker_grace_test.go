@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,4 +144,52 @@ func TestTolerantSettle_AnotherInexactPaymentForTheOrderStillConflictsForTwoHour
 	require.NoError(t, err)
 	assert.True(t, result.Credited)
 	assert.Equal(t, order.ID, result.OrderID)
+}
+
+func TestTolerantSettle_AbsurdExpiryStillFindsTheOtherPaymentForTheOrder(t *testing.T) {
+	// 订单的到期时间被改成接近 int64 上限（Codex 审 v38 时指出）：「到期 + 2 小时」不能溢出成负数，
+	// 漏掉同一张单的另一笔不精确款而自动入账。窗口要放到最宽，照旧转人工。
+	setup := func(t *testing.T) {
+		order := tolOrder(t, "BG-ovf-mine", 9650, tolExpectedMicros, bgBlockTimeMS-113_000, tolFaceQuota)
+		require.NoError(t, DB.Model(&TronTopupOrder{}).Where("id = ?", order.ID).Update("expires_at_ms", int64(math.MaxInt64-1000)).Error)
+	}
+	mineTransfer := tolTransfer(650, tolPaidMicros, bgBlockTimeMS)
+	rival := tolTransfer(651, 14_100_000, bgBlockTimeMS+60*60*1000)
+
+	truncateTables(t)
+	setup(t)
+	_, err := RecordUnmatchedTronDeposit(rival)
+	require.NoError(t, err)
+	requireTolUnmatched(t, mineTransfer, nil, tronTolerantNoteConflictDeposit)
+	assert.Zero(t, tolQuota(t, 9650))
+
+	truncateTablesNow(t)
+	setup(t)
+	requireTolUnmatched(t, mineTransfer, []TronTransferRecord{rival}, tronTolerantNoteConflictDeposit)
+	assert.Zero(t, tolQuota(t, 9650))
+}
+
+func TestTolerantSettle_PaidOffOrderInsideTheWindowStillCountsForTheCreditCheck(t *testing.T) {
+	// v2 起的现状，本次不改（交站长定）：窗口内别人的已精确付清单不再挡人，但仍参与「几张单要算出同样的
+	// 入账额度」那道检查。少付时两张单按比例算出的额度只差尾数，于是判 same_user_ambiguous 转人工。
+	// 出了窗口它就不再参与。
+	setup := func(t *testing.T, mineCreatedAfterMS int64) TronTransferRecord {
+		blocker := tolOrder(t, "BG-po-other", 9660, pbBlockerExpected, tolBaseMS, tolFaceQuota)
+		pbPayExact(t, blocker, 660, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
+		created := tolBaseMS + mineCreatedAfterMS
+		tolOrder(t, "BG-po-mine", 9661, pbMineExpected, created, tolFaceQuota)
+		return tolTransfer(661, 14_500_000, created+pbMineBlockLeadMS)
+	}
+
+	truncateTables(t)
+	requireTolUnmatched(t, setup(t, pbMineInWindowCreatedAfterMS), nil, tronTolerantNoteSameUserAmbiguous)
+	assert.Zero(t, tolQuota(t, 9661))
+
+	truncateTablesNow(t)
+	result, err := SettleTronDepositTolerant(setup(t, pbMineCreatedAfterMS), nil, "tron-scanner")
+	require.NoError(t, err)
+	assert.True(t, result.Credited, "出了窗口的已付清单不再参与额度检查")
+	want, err := tronSettlementQuota(pbMineExpected, 14_500_000, tolFaceQuota)
+	require.NoError(t, err)
+	assert.Equal(t, want, tolQuota(t, 9661), "少付按比例入账")
 }

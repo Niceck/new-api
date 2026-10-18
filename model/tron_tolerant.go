@@ -372,8 +372,9 @@ func pickTronTolerantCandidate(transfer TronTransferRecord, plausible []TronTopu
 // tronTolerantOrderCounts reports whether a plausible order still bears on a
 // tolerant credit to candidate: the same user's orders count for the whole
 // plausible grace, another user's only until tronTolerantBlockerGraceMS after
-// it expired. The plausible query keeps the order's expiry within the
-// plausible grace of the block, so the difference cannot overflow.
+// it expired. The plausible query keeps the order's expiry no earlier than
+// the plausible grace before the block, and the block is positive, so the
+// difference cannot overflow.
 func tronTolerantOrderCounts(transfer TronTransferRecord, candidate, order *TronTopupOrder) bool {
 	return order.UserID == candidate.UserID || transfer.BlockTimestampMS-order.ExpiresAtMS <= tronTolerantBlockerGraceMS
 }
@@ -470,7 +471,12 @@ func loadTronPlausibleOrders(tx *gorm.DB, transfer TronTransferRecord) ([]TronTo
 // the order of traversal must not decide who gets the order.
 func tronTolerantDepositConflict(tx *gorm.DB, transfer TronTransferRecord, candidate *TronTopupOrder, peers []TronTransferRecord) (bool, error) {
 	fromMS := candidate.CreatedAtMS
-	toMS := candidate.ExpiresAtMS + tronTolerantPlausibleGraceMS
+	// An absurd expiry must widen the window to the end of time, never wrap the
+	// sum around to the past and miss a rival payment.
+	toMS := int64(math.MaxInt64)
+	if candidate.ExpiresAtMS <= math.MaxInt64-tronTolerantPlausibleGraceMS {
+		toMS = candidate.ExpiresAtMS + tronTolerantPlausibleGraceMS
+	}
 	var rivals []TronDeposit
 	if err := tx.
 		Where("tx_id <> ? AND to_address = ? AND token_contract = ?", transfer.TxID, transfer.ToAddress, transfer.TokenContract).
