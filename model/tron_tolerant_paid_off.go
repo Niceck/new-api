@@ -52,7 +52,9 @@ func loadTronPaidOffOrders(tx *gorm.DB, transfer TronTransferRecord, plausible [
 }
 
 // tronPaidOrdersPastBlock keeps the successful orders whose credit happened
-// more than tronTolerantPaidExactBlockMS before the transfer's block.
+// more than tronTolerantPaidExactBlockMS before the transfer's block. Both
+// times are positive, so their difference cannot overflow where adding the
+// window to an absurd credit time would.
 func tronPaidOrdersPastBlock(transfer TronTransferRecord, plausible []TronTopupOrder, topUps map[int]TopUp) []*TronTopupOrder {
 	var orders []*TronTopupOrder
 	for i := range plausible {
@@ -61,7 +63,7 @@ func tronPaidOrdersPastBlock(transfer TronTransferRecord, plausible []TronTopupO
 		if !ok || !tronTopUpMatchesOrder(topUp, order) || topUp.Status != common.TopUpStatusSuccess {
 			continue
 		}
-		if order.CompletedAtMS <= 0 || transfer.BlockTimestampMS <= order.CompletedAtMS+tronTolerantPaidExactBlockMS {
+		if order.CompletedAtMS <= 0 || transfer.BlockTimestampMS-order.CompletedAtMS <= tronTolerantPaidExactBlockMS {
 			continue
 		}
 		orders = append(orders, order)

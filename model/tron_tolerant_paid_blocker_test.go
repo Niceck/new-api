@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -215,6 +217,53 @@ func TestTolerantSettle_PaidExactOrderWithoutCreditTimeKeepsBlocking(t *testing.
 	require.NoError(t, DB.Model(&TronTopupOrder{}).Where("id = ?", blocker.ID).Update("completed_at_ms", 0).Error)
 
 	_, transfer := pbMineAnHourLater(t, "PB-nots-mine", 9461, 461)
+	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
+}
+
+func TestTolerantSettle_PaidExactOrderWithAnAbsurdCreditTimeKeepsBlocking(t *testing.T) {
+	truncateTables(t)
+	// 完成时间被改成极大值：「完成时间 + 2 分钟」会溢出成负数。必须照旧挡，不能因此放行。
+	blocker := tolOrder(t, "PB-ovf-other", 9500, pbBlockerExpected, tolBaseMS, tolFaceQuota)
+	pbPayExact(t, blocker, 500, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
+	require.NoError(t, DB.Model(&TronTopupOrder{}).Where("id = ?", blocker.ID).Update("completed_at_ms", int64(math.MaxInt64)).Error)
+
+	_, transfer := pbMineAnHourLater(t, "PB-ovf-mine", 9501, 501)
+	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
+	assert.Zero(t, tolQuota(t, 9501))
+}
+
+func TestTolerantSettle_PaidExactOrderFoundLateBlocksUntilTwoMinutesAfterThatCredit(t *testing.T) {
+	truncateTables(t)
+	// 每小时的宽对账晚了 3 小时才扫到别人的精确款，完成时间就是扫到的时间。
+	// 在那之前上链的不精确款，哪怕比那笔精确款晚一个多小时，也照旧挡。
+	blocker := tolOrder(t, "PB-recon-other", 9510, pbBlockerExpected, tolBaseMS, tolFaceQuota)
+	pbPayExact(t, blocker, 510, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+3*60*60*1000)
+
+	_, transfer := pbMineAnHourLater(t, "PB-recon-mine", 9511, 511)
+	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
+	assert.Zero(t, tolQuota(t, 9511))
+}
+
+func TestTolerantSettle_ExactCreditWithoutMatchModeKeepsBlocking(t *testing.T) {
+	truncateTables(t)
+	// v31 之前入账的款没有记 match_mode：不认作「扫描器自动入账的精确款」。
+	blocker := tolOrder(t, "PB-nomode-other", 9520, pbBlockerExpected, tolBaseMS, tolFaceQuota)
+	pbPayExact(t, blocker, 520, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
+	require.NoError(t, DB.Model(&TronDeposit{}).Where("order_id = ?", blocker.ID).Update("match_mode", "").Error)
+
+	_, transfer := pbMineAnHourLater(t, "PB-nomode-mine", 9521, 521)
+	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
+}
+
+func TestTolerantSettle_SameAmountPaidElsewhereStillCountsAgainstThePaidOrder(t *testing.T) {
+	truncateTables(t)
+	// 按金额认款时不分收款地址与代币：别处一笔同额的款也算这张单的又一笔付款，保守地照旧挡。
+	blocker := tolOrder(t, "PB-addr-other", 9530, pbBlockerExpected, tolBaseMS, tolFaceQuota)
+	pbPayExact(t, blocker, 530, tolBaseMS+pbBlockerBlockLeadMS, tolBaseMS+pbBlockerCreditLeadMS)
+	elsewhere := TronDeposit{TxID: fmt.Sprintf("%064x", 531), BlockTimestampMS: tolBaseMS + 600_000, FromAddress: "TJmmqjb1DK9TTZbQXzRQ2AuA94z4gKAPFh", ToAddress: "TLsV52sRDL79HXGGm9yzwKibb6BeruhUzy", TokenContract: testTronUSDTContract, AmountMicros: pbBlockerExpected, Status: TronDepositStatusUnmatched, ObservedAtMS: tolBaseMS + 800_000}
+	require.NoError(t, DB.Create(&elsewhere).Error)
+
+	_, transfer := pbMineAnHourLater(t, "PB-addr-mine", 9531, 532)
 	requireTolUnmatched(t, transfer, nil, tronTolerantNoteBlockedOtherUser)
 }
 
