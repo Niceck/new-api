@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
@@ -308,6 +309,10 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	}
 
 	if s.relayInfo.BillingRounding != nil && s.relayInfo.BillingRounding.Enabled {
+		return false
+	}
+	// 信任旁路单独开关（默认关）：关掉按分取整不应顺带打开免预扣
+	if !operation_setting.GetQuotaSetting().TrustBypassEnabled {
 		return false
 	}
 	trustQuota := common.GetTrustQuota()

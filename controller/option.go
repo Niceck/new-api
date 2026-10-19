@@ -317,6 +317,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "quota_setting.trust_bypass_enabled", "quota_setting.round_charge_to_cny_cent":
+		// 框架按 strconv.ParseBool 解析、失败静默跳过；扣费开关只认规范写法，免得写进库却不生效
+		if v := option.Value.(string); v != "true" && v != "false" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": option.Key + " 只接受 true 或 false",
+			})
+			return
+		}
 	case "general_setting.stream_header_timeout_by_channel":
 		err = operation_setting.ValidateStreamHeaderTimeouts(option.Value.(string))
 		if err != nil {
