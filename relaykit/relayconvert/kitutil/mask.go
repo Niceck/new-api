@@ -14,40 +14,66 @@ var (
 	maskApiKeyPattern = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
 )
 
-// requestFieldRoots are the leading names of request-parameter paths that upstream
-// errors quote (thinking.type, messages.3.content). They look like domains, and
-// masking them hides which parameter the customer has to fix.
-var requestFieldRoots = map[string]bool{"thinking": true, "messages": true, "tools": true, "system": true}
+// Upstream errors quote request-parameter paths (thinking.type=adaptive,
+// messages.3.content.0) that look like domains; masking them hides which parameter
+// the customer has to fix. Only these exact shapes are kept, so no real host passes:
+//
+//	thinking.type[.adaptive|.disabled|.enabled]
+//	messages|tools|system.<index>[.<known field>|.<index>]...
+var (
+	requestFieldRoots  = map[string]bool{"messages": true, "tools": true, "system": true}
+	thinkingTypeValues = map[string]bool{"adaptive": true, "disabled": true, "enabled": true}
+	requestFieldNames  = map[string]bool{
+		"content": true, "text": true, "image": true, "source": true, "data": true,
+		"base64": true, "input": true, "custom": true, "type": true, "document": true,
+		"signature": true, "thinking": true, "citations": true, "title": true, "context": true,
+	}
+)
 
-// hostTLDs are common real domain suffixes: a path-shaped match ending in one of
-// these is still masked as a host, so upstream domains never leak.
-var hostTLDs = map[string]bool{
-	"com": true, "net": true, "org": true, "dev": true, "ai": true, "io": true, "top": true,
-	"cn": true, "app": true, "cloud": true, "co": true, "xyz": true, "me": true, "cc": true,
-	"tech": true, "site": true, "online": true, "info": true, "biz": true, "us": true,
-	"uk": true, "jp": true, "hk": true, "sg": true, "de": true, "fr": true, "ru": true,
-	"tw": true, "kr": true, "in": true, "eu": true, "ca": true, "au": true, "nl": true,
-	"br": true, "it": true, "es": true, "ch": true, "se": true, "vip": true, "shop": true,
-	"store": true, "live": true, "pro": true, "link": true, "page": true, "run": true,
-	"sh": true, "so": true, "to": true, "tv": true, "gg": true, "ly": true, "icu": true,
-	"club": true, "work": true, "fun": true, "ink": true, "wiki": true, "one": true,
-	"edu": true, "gov": true,
-}
-
-// isRequestFieldPath allows only two shapes: thinking.type..., and messages/tools/system
-// followed by a numeric index. Anything ending in a common TLD stays masked.
-func isRequestFieldPath(match string) bool {
-	labels := strings.Split(match, ".")
-	if len(labels) < 2 || !requestFieldRoots[labels[0]] {
+// isRequestFieldPath reports whether the domain-shaped match str[start:end] is one of
+// the request-parameter path shapes above. A match followed by '-' is a host the
+// pattern cut short (punycode xn--...), so it is never kept.
+func isRequestFieldPath(str string, start, end int) bool {
+	if end < len(str) && str[end] == '-' {
 		return false
 	}
-	if hostTLDs[strings.ToLower(labels[len(labels)-1])] {
+	labels := strings.Split(str[start:end], ".")
+	if len(labels) < 2 {
 		return false
 	}
 	if labels[0] == "thinking" {
-		return labels[1] == "type"
+		return labels[1] == "type" && (len(labels) == 2 || (len(labels) == 3 && thinkingTypeValues[labels[2]]))
 	}
-	return isDigits(labels[1])
+	if !requestFieldRoots[labels[0]] || !isDigits(labels[1]) {
+		return false
+	}
+	for _, label := range labels[2:] {
+		if !isDigits(label) && !requestFieldNames[label] {
+			return false
+		}
+	}
+	return true
+}
+
+// maskPlainDomains masks domain names without protocol, keeping request-parameter paths.
+func maskPlainDomains(str string) string {
+	matches := maskDomainPattern.FindAllStringIndex(str, -1)
+	if len(matches) == 0 {
+		return str
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		b.WriteString(str[last:m[0]])
+		if isRequestFieldPath(str, m[0], m[1]) {
+			b.WriteString(str[m[0]:m[1]])
+		} else {
+			b.WriteString(maskHostForPlainDomain(str[m[0]:m[1]]))
+		}
+		last = m[1]
+	}
+	b.WriteString(str[last:])
+	return b.String()
 }
 
 func isDigits(s string) bool {
@@ -168,12 +194,7 @@ func MaskSensitiveInfo(str string) string {
 	})
 
 	// Mask domain names without protocol (like openai.com, www.openai.com)
-	str = maskDomainPattern.ReplaceAllStringFunc(str, func(domain string) string {
-		if isRequestFieldPath(domain) {
-			return domain
-		}
-		return maskHostForPlainDomain(domain)
-	})
+	str = maskPlainDomains(str)
 
 	// Mask IP addresses
 	str = maskIPPattern.ReplaceAllString(str, "***.***.***.***")

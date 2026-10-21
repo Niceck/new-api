@@ -239,16 +239,24 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 	return result
 }
 
+// anthropicErrorTypes are the error types the Anthropic API documents. An upstream
+// type outside this set is never echoed, so arbitrary upstream text cannot reach clients.
+var anthropicErrorTypes = map[string]bool{
+	"invalid_request_error": true, "authentication_error": true, "billing_error": true,
+	"permission_error": true, "not_found_error": true, "request_too_large": true,
+	"rate_limit_error": true, "api_error": true, "overloaded_error": true,
+}
+
 // claudeErrorTypeOf keeps the old rule (type = code) when the upstream sent a code.
 // Anthropic-format upstream errors carry no code, which used to surface as "<nil>";
-// fall back to the upstream type for those.
+// for those use the upstream type if it is a documented Anthropic type.
 func claudeErrorTypeOf(openAIError OpenAIError) string {
 	if openAIError.Code != nil {
 		if code := fmt.Sprintf("%v", openAIError.Code); code != "" {
 			return code
 		}
 	}
-	if openAIError.Type != "" {
+	if anthropicErrorTypes[openAIError.Type] {
 		return openAIError.Type
 	}
 	return "upstream_error"

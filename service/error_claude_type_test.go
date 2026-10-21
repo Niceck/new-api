@@ -50,6 +50,35 @@ func TestRelayErrorHandlerKeepsCodeAsClaudeType(t *testing.T) {
 	assert.Equal(t, "model_not_found", errType)
 }
 
+// 回退时只认 Anthropic 的错误类型：上游塞进 type 的任意字符串（域名、URL、key）不能原样给客户。
+func TestRelayErrorHandlerRejectsUnknownUpstreamType(t *testing.T) {
+	for _, code := range []string{``, `"code":null,`, `"code":"",`} {
+		body := `{"error":{` + code + `"type":"https://vendor.example.com/v1?api_key=secret","message":"failed"}}`
+		errType, _ := claudeErrorFromUpstream(t, http.StatusBadGateway, body)
+		assert.Equal(t, "upstream_error", errType, body)
+	}
+}
+
+// code 为 JSON null 与没有 code 等价；数字 code 维持原行为。
+func TestRelayErrorHandlerNullAndNumericCode(t *testing.T) {
+	errType, _ := claudeErrorFromUpstream(t, http.StatusBadRequest,
+		`{"error":{"code":null,"type":"overloaded_error","message":"busy"}}`)
+	assert.Equal(t, "overloaded_error", errType)
+	errType, _ = claudeErrorFromUpstream(t, http.StatusBadRequest,
+		`{"error":{"code":0,"type":"invalid_request_error","message":"bad"}}`)
+	assert.Equal(t, "0", errType)
+}
+
+// OpenAI 格式的出口不受这次改动影响：type 仍是上游的 type。
+func TestRelayErrorHandlerOpenAIOutputUnchanged(t *testing.T) {
+	newAPIErr := RelayErrorHandler(context.Background(), upstreamErrorResponse(http.StatusBadRequest,
+		`{"type":"error","error":{"type":"invalid_request_error","message":"bad thinking.type"}}`), false)
+	require.NotNil(t, newAPIErr)
+	oaiErr := newAPIErr.ToOpenAIError()
+	assert.Equal(t, "invalid_request_error", oaiErr.Type)
+	assert.Equal(t, "bad thinking.type", oaiErr.Message)
+}
+
 // 既没有 code 也没有 type 时退回 upstream_error（WithOpenAIError 补的默认值）。
 func TestRelayErrorHandlerFallsBackToUpstreamErrorType(t *testing.T) {
 	body := `{"error":{"message":"upstream overloaded"}}`

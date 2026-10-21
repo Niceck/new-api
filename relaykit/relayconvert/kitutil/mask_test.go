@@ -39,6 +39,15 @@ func TestMaskSensitiveInfoStillMasksHosts(t *testing.T) {
 		"tools.example.io is down":                               "***.***.io is down",
 		"see openai.com":                                         "see ***.com",
 		"thinking.example.co.uk is down":                         "***.***.co.uk is down",
+		// Codex 审出的放行绕过：TLD 不在清单里、Punycode 截断、大写协议、非法端口。
+		"dial tcp: lookup messages.1.vendor.network:443 failed": "dial tcp: lookup ***.***.***.network:443 failed",
+		"lookup thinking.type.xn--p1ai failed":                  "lookup ***.***.xn--p1ai failed",
+		"HTTPS://thinking.type.network/v1":                      "HTTPS://***.***.network/v1",
+		"https://thinking.type.network:bad/v1":                  "https://***.***.network:bad/v1",
+		"thinking.type.adaptive.vendor.com is down":             "***.***.***.***.com is down",
+		"messages.0.content.vendor.network is down":             "***.***.***.***.network is down",
+		"thinking.type.enabled-vendor.network is down":          "***.***.***.network is down",
+		"tools.0.custom.xn--p1ai is down":                       "***.***.***.xn--p1ai is down",
 	}
 	for input, want := range cases {
 		assert.Equal(t, want, MaskSensitiveInfo(input), input)
