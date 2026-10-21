@@ -30,11 +30,51 @@ var (
 	}
 )
 
+// isFieldPathBoundary reports whether c may sit right before or after a request
+// parameter path. Anything else (dots, hyphens, letters, non-ASCII bytes) could be
+// part of a longer host name that the ASCII-only pattern cut short.
+func isFieldPathBoundary(c byte) bool {
+	return strings.IndexByte(" \t\r\n\"'`=:,;()[]{}<>", c) >= 0
+}
+
+// fieldPathTailEnd skips the continuations the pattern stops at (".0" in
+// messages.3.content.0, ".between_tools" in thinking.type.between_tools) and returns
+// where the path ends, or -1 when a following segment could be a host label: only
+// all-digit or snake_case ASCII segments are accepted.
+func fieldPathTailEnd(str string, end int) int {
+	for end < len(str) && str[end] == '.' {
+		j := end + 1
+		digits, underscore := true, false
+		for j < len(str) && (isASCIIAlnum(str[j]) || str[j] == '_') {
+			if str[j] < '0' || str[j] > '9' {
+				digits = false
+			}
+			if str[j] == '_' {
+				underscore = true
+			}
+			j++
+		}
+		if j == end+1 || !(digits || underscore) {
+			return -1
+		}
+		end = j
+	}
+	return end
+}
+
+func isASCIIAlnum(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
 // isRequestFieldPath reports whether the domain-shaped match str[start:end] is one of
-// the request-parameter path shapes above. A match followed by '-' is a host the
-// pattern cut short (punycode xn--...), so it is never kept.
+// the request-parameter path shapes above and is delimited on both sides, so it cannot
+// be a fragment of a host name.
 func isRequestFieldPath(str string, start, end int) bool {
-	if end < len(str) && str[end] == '-' {
+	if start > 0 && !isFieldPathBoundary(str[start-1]) {
+		return false
+	}
+	tail := fieldPathTailEnd(str, end)
+	if tail < 0 || (tail < len(str) && !isFieldPathBoundary(str[tail])) {
 		return false
 	}
 	labels := strings.Split(str[start:end], ".")

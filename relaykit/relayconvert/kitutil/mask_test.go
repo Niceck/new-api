@@ -14,6 +14,8 @@ func TestMaskSensitiveInfoKeepsRequestFieldPaths(t *testing.T) {
 		`"thinking.type.disabled" is not supported for this model. Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.`,
 		"claude-sonnet-5-5 requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes",
 		"messages.3.content.0: Invalid `signature` in `thinking` block",
+		`"thinking.type.disabled" is not supported for this model. Use "thinking.type.between_tools" for the lowest thinking setting.`,
+		"(thinking.type=adaptive), [messages.1.content.0]",
 		"messages.12.content.1.image.source.base64.data: The image was specified using the image/jpeg media type",
 		"tools.0.custom.input_schema: JSON schema is invalid",
 		"system.1.text: cache_control cannot be set for empty text blocks",
@@ -48,6 +50,16 @@ func TestMaskSensitiveInfoStillMasksHosts(t *testing.T) {
 		"messages.0.content.vendor.network is down":             "***.***.***.***.network is down",
 		"thinking.type.enabled-vendor.network is down":          "***.***.***.network is down",
 		"tools.0.custom.xn--p1ai is down":                       "***.***.***.xn--p1ai is down",
+		// Codex 第二轮：正则只认 ASCII，Unicode 域名被截出前缀后不能放行。
+		"lookup thinking.type.中国 failed":                    "lookup ***.type.中国 failed",
+		"dial tcp: lookup messages.0.content.中国:443 failed": "dial tcp: lookup ***.***.content.中国:443 failed",
+		"HTTPS://thinking.type.中国/v1":                       "HTTPS://***.type.中国/v1",
+		"https://thinking.type.中国:bad/v1":                   "https://***.type.中国:bad/v1",
+		"thinking.type.中国,thinking.type.中国":                 "***.type.中国,***.type.中国",
+		"中国.thinking.type is down":                          "中国.***.type is down",
+		"lookup thinking.type。中国 failed":                    "lookup ***.type。中国 failed",
+		"messages.0.content.0.tool_use.id is bad":           "***.***.content.0.tool_use.id is bad",
+		"see thinking.type.a_b.中国":                          "see ***.type.a_b.中国",
 	}
 	for input, want := range cases {
 		assert.Equal(t, want, MaskSensitiveInfo(input), input)
