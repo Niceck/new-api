@@ -14,6 +14,54 @@ var (
 	maskApiKeyPattern = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
 )
 
+// requestFieldRoots are the leading names of request-parameter paths that upstream
+// errors quote (thinking.type, messages.3.content). They look like domains, and
+// masking them hides which parameter the customer has to fix.
+var requestFieldRoots = map[string]bool{"thinking": true, "messages": true, "tools": true, "system": true}
+
+// hostTLDs are common real domain suffixes: a path-shaped match ending in one of
+// these is still masked as a host, so upstream domains never leak.
+var hostTLDs = map[string]bool{
+	"com": true, "net": true, "org": true, "dev": true, "ai": true, "io": true, "top": true,
+	"cn": true, "app": true, "cloud": true, "co": true, "xyz": true, "me": true, "cc": true,
+	"tech": true, "site": true, "online": true, "info": true, "biz": true, "us": true,
+	"uk": true, "jp": true, "hk": true, "sg": true, "de": true, "fr": true, "ru": true,
+	"tw": true, "kr": true, "in": true, "eu": true, "ca": true, "au": true, "nl": true,
+	"br": true, "it": true, "es": true, "ch": true, "se": true, "vip": true, "shop": true,
+	"store": true, "live": true, "pro": true, "link": true, "page": true, "run": true,
+	"sh": true, "so": true, "to": true, "tv": true, "gg": true, "ly": true, "icu": true,
+	"club": true, "work": true, "fun": true, "ink": true, "wiki": true, "one": true,
+	"edu": true, "gov": true,
+}
+
+// isRequestFieldPath allows only two shapes: thinking.type..., and messages/tools/system
+// followed by a numeric index. Anything ending in a common TLD stays masked.
+func isRequestFieldPath(match string) bool {
+	labels := strings.Split(match, ".")
+	if len(labels) < 2 || !requestFieldRoots[labels[0]] {
+		return false
+	}
+	if hostTLDs[strings.ToLower(labels[len(labels)-1])] {
+		return false
+	}
+	if labels[0] == "thinking" {
+		return labels[1] == "type"
+	}
+	return isDigits(labels[1])
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // maskHostTail returns the tail parts of a domain/host that should be preserved.
 // It keeps 2 parts for likely country-code TLDs (e.g., co.uk, com.cn), otherwise keeps only the TLD.
 func maskHostTail(parts []string) []string {
@@ -121,6 +169,9 @@ func MaskSensitiveInfo(str string) string {
 
 	// Mask domain names without protocol (like openai.com, www.openai.com)
 	str = maskDomainPattern.ReplaceAllStringFunc(str, func(domain string) string {
+		if isRequestFieldPath(domain) {
+			return domain
+		}
 		return maskHostForPlainDomain(domain)
 	})
 

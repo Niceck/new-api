@@ -217,7 +217,7 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 		if openAIError, ok := e.RelayError.(OpenAIError); ok {
 			result = ClaudeError{
 				Message: e.Error(),
-				Type:    fmt.Sprintf("%v", openAIError.Code),
+				Type:    claudeErrorTypeOf(openAIError),
 			}
 		}
 	case ErrorTypeClaudeError:
@@ -237,6 +237,21 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 		result.Message = string(e.errorType)
 	}
 	return result
+}
+
+// claudeErrorTypeOf keeps the old rule (type = code) when the upstream sent a code.
+// Anthropic-format upstream errors carry no code, which used to surface as "<nil>";
+// fall back to the upstream type for those.
+func claudeErrorTypeOf(openAIError OpenAIError) string {
+	if openAIError.Code != nil {
+		if code := fmt.Sprintf("%v", openAIError.Code); code != "" {
+			return code
+		}
+	}
+	if openAIError.Type != "" {
+		return openAIError.Type
+	}
+	return "upstream_error"
 }
 
 type NewAPIErrorOptions func(*NewAPIError)
