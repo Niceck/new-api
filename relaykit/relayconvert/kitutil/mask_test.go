@@ -25,6 +25,21 @@ func TestMaskSensitiveInfoKeepsRequestFieldPaths(t *testing.T) {
 	}
 }
 
+// Codex 第三轮建议补的边界：空串、非法 UTF-8、与 IP / api_key / URL 混在一起。
+func TestMaskSensitiveInfoEdgeInputs(t *testing.T) {
+	cases := map[string]string{
+		"":                  "",
+		"thinking.type\xff": "***.type\xff",
+		"\xffthinking.type": "\xff***.type",
+		"thinking.type=adaptive from 198.13.49.40 api_key:abc":  "thinking.type=adaptive from ***.***.***.*** api_key:***",
+		"messages.0.content: see https://cc-hq.freemodel.dev/x": "messages.0.content: see https://***.dev/***",
+		"messages.0.content.1.2.3.4 bad":                        "messages.0.content.***.***.***.*** bad",
+	}
+	for input, want := range cases {
+		assert.Equal(t, want, MaskSensitiveInfo(input), input)
+	}
+}
+
 // 放行参数路径不能顺带放出上游的域名、地址与 IP。
 func TestMaskSensitiveInfoStillMasksHosts(t *testing.T) {
 	cases := map[string]string{

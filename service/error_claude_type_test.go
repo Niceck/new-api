@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,6 +79,15 @@ func TestRelayErrorHandlerOpenAIOutputUnchanged(t *testing.T) {
 	oaiErr := newAPIErr.ToOpenAIError()
 	assert.Equal(t, "invalid_request_error", oaiErr.Type)
 	assert.Equal(t, "bad thinking.type", oaiErr.Message)
+}
+
+// 另外两个脱敏调用方：保留参数路径、照旧遮上游主机。
+func TestOtherMaskCallersKeepFieldPathsAndMaskHosts(t *testing.T) {
+	taskErr := TaskErrorWrapper(errors.New("post https://cc-hq.freemodel.dev failed thinking.type"), "bad", http.StatusBadGateway)
+	assert.Equal(t, "post https://***.dev failed thinking.type", taskErr.Message)
+
+	newAPIErr := types.WithOpenAIError(types.OpenAIError{Message: "lookup cc-hq.freemodel.dev failed for thinking.type"}, http.StatusBadGateway)
+	assert.Equal(t, "lookup ***.***.dev failed for thinking.type", newAPIErr.MaskSensitiveError())
 }
 
 // 既没有 code 也没有 type 时退回 upstream_error（WithOpenAIError 补的默认值）。
