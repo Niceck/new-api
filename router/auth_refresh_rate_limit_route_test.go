@@ -1,8 +1,10 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -43,6 +45,15 @@ func useAuthRateLimits(t *testing.T, criticalNum int, refreshNum int) {
 	})
 }
 
+// The in-memory limiter is shared by the whole test process and never reset,
+// so every test run takes its own client address from a process-wide counter.
+var authRateLimitRouteTestRuns atomic.Int64
+
+func nextAuthRateLimitTestAddr() string {
+	run := authRateLimitRouteTestRuns.Add(1)
+	return fmt.Sprintf("198.18.%d.%d:40000", run>>8&0xff, run&0xff)
+}
+
 func postFromIP(engine http.Handler, path string, remoteAddr string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodPost, path, nil)
 	request.RemoteAddr = remoteAddr
@@ -60,7 +71,7 @@ func TestAuthRefreshExhaustionDoesNotBlockLogin(t *testing.T) {
 	engine := gin.New()
 	SetApiRouter(engine)
 
-	const remoteAddr = "192.0.2.71:40000"
+	remoteAddr := nextAuthRateLimitTestAddr()
 	for i := 1; i <= 3; i++ {
 		response := postFromIP(engine, "/api/user/auth/refresh", remoteAddr)
 		require.NotEqual(t, http.StatusTooManyRequests, response.Code, "refresh %d is within its own budget", i)
@@ -79,7 +90,7 @@ func TestLoginRateLimitStillAppliesAndDoesNotBlockAuthRefresh(t *testing.T) {
 	engine := gin.New()
 	SetApiRouter(engine)
 
-	const remoteAddr = "192.0.2.72:40000"
+	remoteAddr := nextAuthRateLimitTestAddr()
 	for i := 1; i <= 2; i++ {
 		response := postFromIP(engine, "/api/user/login", remoteAddr)
 		require.NotEqual(t, http.StatusTooManyRequests, response.Code, "login %d is within the sensitive-route budget", i)
@@ -99,7 +110,7 @@ func TestAuthRefreshRateLimitCanBeDisabled(t *testing.T) {
 	engine := gin.New()
 	SetApiRouter(engine)
 
-	const remoteAddr = "192.0.2.73:40000"
+	remoteAddr := nextAuthRateLimitTestAddr()
 	for i := 1; i <= 5; i++ {
 		response := postFromIP(engine, "/api/user/auth/refresh", remoteAddr)
 		require.NotEqual(t, http.StatusTooManyRequests, response.Code, "refresh %d with the limiter disabled", i)
