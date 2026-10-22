@@ -81,6 +81,14 @@ func TestSystemOverloadThresholdChangeResetsStreak(t *testing.T) {
 	var detector overloadDetector
 	assert.Nil(t, sample(&detector, low, at(0), SystemStatus{CPUUsage: 91}))
 	assert.Nil(t, sample(&detector, low, at(1), SystemStatus{CPUUsage: 91}))
+	published := SystemStatus{CPUUsage: 99, SampledAt: at(2)}
+	detector.mark(&published, low)
+	require.NotNil(t, CheckSystemOverload(published, low, at(2)), "阈值 90 下连续 3 次")
+	// 改成 97 后、下一次采样前的请求：旧标记是在 90 下形成的，作废放行。
+	assert.Nil(t, CheckSystemOverload(published, high, at(2).Add(time.Second)))
+	detector = overloadDetector{}
+	assert.Nil(t, sample(&detector, low, at(0), SystemStatus{CPUUsage: 91}))
+	assert.Nil(t, sample(&detector, low, at(1), SystemStatus{CPUUsage: 91}))
 	// 调高到 97 后只有这一次超过新阈值，不能借旧阈值下的两次凑满。
 	assert.Nil(t, sample(&detector, high, at(2), SystemStatus{CPUUsage: 99}))
 	assert.Nil(t, sample(&detector, high, at(3), SystemStatus{CPUUsage: 99}))
@@ -132,7 +140,7 @@ func TestSystemOverloadThresholdUsesIntegerPart(t *testing.T) {
 func TestCheckSystemOverload(t *testing.T) {
 	now := time.Date(2026, 9, 11, 3, 0, 0, 0, time.UTC)
 	enabled := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
-	cpuOverloaded := SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, SampledAt: now}
+	cpuOverloaded := SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, CPUOverloadThreshold: 90, SampledAt: now}
 	tests := []struct {
 		name        string
 		status      SystemStatus
@@ -149,37 +157,41 @@ func TestCheckSystemOverload(t *testing.T) {
 		},
 		{
 			name:        "fresh memory overload",
-			status:      SystemStatus{MemoryUsage: 96.2, MemoryOverloaded: true, SampledAt: now},
+			status:      SystemStatus{MemoryUsage: 96.2, SampledAt: now},
 			config:      enabled,
 			wantCode:    "system_memory_overloaded",
 			wantMessage: "system memory overloaded (current: 96.2%, threshold: 90%)",
 		},
 		{
 			name:        "fresh disk overload",
-			status:      SystemStatus{DiskUsage: 97, DiskOverloaded: true, SampledAt: now},
+			status:      SystemStatus{DiskUsage: 97, SampledAt: now},
 			config:      enabled,
 			wantCode:    "system_disk_overloaded",
 			wantMessage: "system disk overloaded (current: 97.0%, threshold: 95%)",
 		},
 		{
-			name:        "lowered threshold reports the active threshold",
-			status:      cpuOverloaded,
-			config:      PerformanceMonitorConfig{Enabled: true, CPUThreshold: 80},
-			wantCode:    "system_cpu_overloaded",
-			wantMessage: "system cpu overloaded (current: 99.5%, threshold: 80%)",
+			name:        "memory threshold lowered applies to the latest sample at once",
+			status:      SystemStatus{MemoryUsage: 85, SampledAt: now},
+			config:      PerformanceMonitorConfig{Enabled: true, MemoryThreshold: 80},
+			wantCode:    "system_memory_overloaded",
+			wantMessage: "system memory overloaded (current: 85.0%, threshold: 80%)",
 		},
+		// CPU 标记是在阈值 90 下连续形成的：阈值一改（调高或调低），旧标记作废，按新阈值重新累计。
+		{name: "cpu threshold lowered waits for a new streak", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, CPUThreshold: 80}},
+		{name: "cpu threshold raised before resample", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, CPUThreshold: 97}},
 		{name: "monitor disabled", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: false, CPUThreshold: 90}},
 		{name: "cpu threshold disabled at runtime", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, CPUThreshold: 0}},
 		{name: "cpu threshold raised above usage", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, CPUThreshold: 100}},
-		{name: "stale sample", status: SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, SampledAt: now.Add(-31 * time.Second)}, config: enabled},
+		{name: "stale sample", status: SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, CPUOverloadThreshold: 90, SampledAt: now.Add(-31 * time.Second)}, config: enabled},
+		{name: "stale memory sample", status: SystemStatus{MemoryUsage: 99, SampledAt: now.Add(-31 * time.Second)}, config: enabled},
 		{
 			name:        "sample exactly at max age still counts",
-			status:      SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, SampledAt: now.Add(-systemStatusMaxAge)},
+			status:      SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, CPUOverloadThreshold: 90, SampledAt: now.Add(-systemStatusMaxAge)},
 			config:      enabled,
 			wantCode:    "system_cpu_overloaded",
 			wantMessage: "system cpu overloaded (current: 99.5%, threshold: 90%)",
 		},
-		{name: "missing sample", status: SystemStatus{CPUUsage: 99.5, CPUOverloaded: true}, config: enabled},
+		{name: "missing sample", status: SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, CPUOverloadThreshold: 90}, config: enabled},
 		{name: "usage above threshold without consecutive samples", status: SystemStatus{CPUUsage: 99.5, SampledAt: now}, config: enabled},
 	}
 	for _, tt := range tests {

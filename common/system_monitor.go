@@ -27,10 +27,10 @@ type SystemStatus struct {
 	MemoryUsage float64
 	DiskUsage   float64
 	SampledAt   time.Time
-	// 过载判定带连续性要求：单次采样的尖峰不再直接熔断，需连续多次超阈值。
-	CPUOverloaded    bool
-	MemoryOverloaded bool
-	DiskOverloaded   bool
+	// CPU 过载判定带连续性要求：单次采样的尖峰不再直接熔断，需连续多次超阈值。
+	// CPUOverloadThreshold 是形成这个标记时的阈值，与当前阈值不一致时标记作废。
+	CPUOverloaded        bool
+	CPUOverloadThreshold int
 }
 
 // SystemOverload 是哨兵据以拒绝请求的过载项，Error 文本带当前值与生效阈值（与此前的报错文案一致）。
@@ -53,11 +53,9 @@ const (
 	// 本站 2 核整机上的 CPU 拒绝多是几秒的尖峰（2026-10 统计：阈值 97 之后约一半落在尖峰头 10 秒内），
 	// 对这种尖峰拒绝客户请求得不偿失。移植自上游 09109ec31 的连续性与新鲜度判定；
 	// 上游同一提交里改看容器自身 CPU / 内存的部分没有移植——本站刻意按整机口径保护。
+	// 内存、磁盘逼近耗尽时多放进来的请求可能直接导致 OOM 或写入失败，仍按最新一次采样对当前阈值
+	// 判定（与上游不同：上游三项都要求连续 3 次；尖峰统计只证明了 CPU 适合延迟保护）。
 	cpuConsecutiveSamples = 3
-	// 内存、磁盘逼近耗尽时多放进来的请求可能直接导致 OOM 或写入失败，仍是单次超阈值即拒绝
-	// （与上游不同：上游三项都要求连续 3 次；尖峰统计只证明了 CPU 适合延迟保护）。
-	memoryConsecutiveSamples = 1
-	diskConsecutiveSamples   = 1
 	// 相邻两次采样间隔超过该时长（监控被阻塞或暂停过）时，之前累计的连续次数作废。
 	maxSampleGap = 3 * systemMonitorInterval
 	// 采样超过该时长未刷新（监控未运行或被阻塞）时，哨兵不据此熔断。
@@ -90,43 +88,28 @@ func StartSystemMonitor() {
 	}()
 }
 
-// overloadDetector 为每项资源累计连续超阈值的采样次数：达到该项要求的次数才标记过载，
-// 任一次回落立即清零并重新累计。只在采样 goroutine 里使用。
+// overloadDetector 累计 CPU 在同一阈值下连续超阈值的采样次数：连续 cpuConsecutiveSamples 次
+// 才标记过载，任一次回落、阈值变化或采样中断都清零重新累计。只在采样 goroutine 里使用。
 type overloadDetector struct {
 	lastSampledAt time.Time
-	cpu           overloadStreak
-	memory        overloadStreak
-	disk          overloadStreak
-}
-
-// overloadStreak 记录某项资源在同一阈值下连续超阈值的次数。
-type overloadStreak struct {
-	samples   int
-	threshold int
+	cpuSamples    int
+	cpuThreshold  int
 }
 
 func (d *overloadDetector) mark(status *SystemStatus, config PerformanceMonitorConfig) {
-	// 采样中断过：之前的连续次数不再代表「连续」，全部作废。
-	if !d.lastSampledAt.IsZero() && status.SampledAt.Sub(d.lastSampledAt) > maxSampleGap {
-		*d = overloadDetector{}
+	// 采样中断过（之前的连续次数不再代表「连续」），或阈值热改过（旧阈值下的次数不能算进新阈值）。
+	gap := !d.lastSampledAt.IsZero() && status.SampledAt.Sub(d.lastSampledAt) > maxSampleGap
+	if gap || config.CPUThreshold != d.cpuThreshold {
+		*d = overloadDetector{cpuThreshold: config.CPUThreshold}
 	}
 	d.lastSampledAt = status.SampledAt
-	status.CPUOverloaded = d.cpu.count(status.CPUUsage, config.CPUThreshold, cpuConsecutiveSamples)
-	status.MemoryOverloaded = d.memory.count(status.MemoryUsage, config.MemoryThreshold, memoryConsecutiveSamples)
-	status.DiskOverloaded = d.disk.count(status.DiskUsage, config.DiskThreshold, diskConsecutiveSamples)
-}
-
-func (s *overloadStreak) count(usage float64, threshold int, required int) bool {
-	// 阈值热改后，旧阈值下累计的次数不能算进新阈值。
-	if threshold != s.threshold {
-		*s = overloadStreak{threshold: threshold}
+	if exceedsThreshold(status.CPUUsage, config.CPUThreshold) {
+		d.cpuSamples = min(d.cpuSamples+1, cpuConsecutiveSamples)
+	} else {
+		d.cpuSamples = 0
 	}
-	if !exceedsThreshold(usage, threshold) {
-		s.samples = 0
-		return false
-	}
-	s.samples = min(s.samples+1, required)
-	return s.samples == required
+	status.CPUOverloaded = d.cpuSamples == cpuConsecutiveSamples
+	status.CPUOverloadThreshold = config.CPUThreshold
 }
 
 // exceedsThreshold 判断采样值是否超过阈值；阈值 <= 0 表示不检查该项。
@@ -162,19 +145,20 @@ func GetSystemStatus() SystemStatus {
 }
 
 // CheckSystemOverload 返回哨兵应据以熔断的过载项。监控关闭、采样缺失或已超过
-// systemStatusMaxAge 时返回 nil。过载标记来自连续采样，阈值按当前配置复核，
-// 运行时关闭或调高阈值后立即放行，不必等待下一次采样。
+// systemStatusMaxAge 时返回 nil。CPU 只认在当前阈值下连续形成的过载标记：
+// 运行时关闭或改过阈值后立即放行，按新阈值重新累计。内存、磁盘按最新一次采样对当前阈值判定。
 func CheckSystemOverload(status SystemStatus, config PerformanceMonitorConfig, now time.Time) *SystemOverload {
 	if !config.Enabled || status.SampledAt.IsZero() || now.Sub(status.SampledAt) > systemStatusMaxAge {
 		return nil
 	}
-	if status.CPUOverloaded && exceedsThreshold(status.CPUUsage, config.CPUThreshold) {
+	if status.CPUOverloaded && status.CPUOverloadThreshold == config.CPUThreshold &&
+		exceedsThreshold(status.CPUUsage, config.CPUThreshold) {
 		return &SystemOverload{Code: "system_cpu_overloaded", Resource: "cpu", Usage: status.CPUUsage, Threshold: config.CPUThreshold}
 	}
-	if status.MemoryOverloaded && exceedsThreshold(status.MemoryUsage, config.MemoryThreshold) {
+	if exceedsThreshold(status.MemoryUsage, config.MemoryThreshold) {
 		return &SystemOverload{Code: "system_memory_overloaded", Resource: "memory", Usage: status.MemoryUsage, Threshold: config.MemoryThreshold}
 	}
-	if status.DiskOverloaded && exceedsThreshold(status.DiskUsage, config.DiskThreshold) {
+	if exceedsThreshold(status.DiskUsage, config.DiskThreshold) {
 		return &SystemOverload{Code: "system_disk_overloaded", Resource: "disk", Usage: status.DiskUsage, Threshold: config.DiskThreshold}
 	}
 	return nil
