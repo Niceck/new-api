@@ -49,11 +49,17 @@ var latestSystemStatus atomic.Value
 
 const (
 	systemMonitorInterval = 5 * time.Second
-	// 连续 3 次采样（约 15 秒）仍高于阈值才判定过载，任一采样回落到阈值以下即恢复。
-	// 本站 2 核整机上的拒绝多是几秒的尖峰（2026-10 统计：阈值 97 之后约一半落在尖峰头 10 秒内），
+	// CPU 连续 3 次采样（约 15 秒）仍高于阈值才判定过载，任一采样回落到阈值以下即恢复。
+	// 本站 2 核整机上的 CPU 拒绝多是几秒的尖峰（2026-10 统计：阈值 97 之后约一半落在尖峰头 10 秒内），
 	// 对这种尖峰拒绝客户请求得不偿失。移植自上游 09109ec31 的连续性与新鲜度判定；
 	// 上游同一提交里改看容器自身 CPU / 内存的部分没有移植——本站刻意按整机口径保护。
-	overloadConsecutiveSamples = 3
+	cpuConsecutiveSamples = 3
+	// 内存、磁盘逼近耗尽时多放进来的请求可能直接导致 OOM 或写入失败，仍是单次超阈值即拒绝
+	// （与上游不同：上游三项都要求连续 3 次；尖峰统计只证明了 CPU 适合延迟保护）。
+	memoryConsecutiveSamples = 1
+	diskConsecutiveSamples   = 1
+	// 相邻两次采样间隔超过该时长（监控被阻塞或暂停过）时，之前累计的连续次数作废。
+	maxSampleGap = 3 * systemMonitorInterval
 	// 采样超过该时长未刷新（监控未运行或被阻塞）时，哨兵不据此熔断。
 	systemStatusMaxAge = 30 * time.Second
 )
@@ -84,27 +90,43 @@ func StartSystemMonitor() {
 	}()
 }
 
-// overloadDetector 为每项资源累计连续超阈值的采样次数：连续 overloadConsecutiveSamples 次
-// 才标记过载，任一次回落立即清零并重新累计。
+// overloadDetector 为每项资源累计连续超阈值的采样次数：达到该项要求的次数才标记过载，
+// 任一次回落立即清零并重新累计。只在采样 goroutine 里使用。
 type overloadDetector struct {
-	cpuSamples    int
-	memorySamples int
-	diskSamples   int
+	lastSampledAt time.Time
+	cpu           overloadStreak
+	memory        overloadStreak
+	disk          overloadStreak
+}
+
+// overloadStreak 记录某项资源在同一阈值下连续超阈值的次数。
+type overloadStreak struct {
+	samples   int
+	threshold int
 }
 
 func (d *overloadDetector) mark(status *SystemStatus, config PerformanceMonitorConfig) {
-	status.CPUOverloaded = countOverloadSample(&d.cpuSamples, exceedsThreshold(status.CPUUsage, config.CPUThreshold))
-	status.MemoryOverloaded = countOverloadSample(&d.memorySamples, exceedsThreshold(status.MemoryUsage, config.MemoryThreshold))
-	status.DiskOverloaded = countOverloadSample(&d.diskSamples, exceedsThreshold(status.DiskUsage, config.DiskThreshold))
+	// 采样中断过：之前的连续次数不再代表「连续」，全部作废。
+	if !d.lastSampledAt.IsZero() && status.SampledAt.Sub(d.lastSampledAt) > maxSampleGap {
+		*d = overloadDetector{}
+	}
+	d.lastSampledAt = status.SampledAt
+	status.CPUOverloaded = d.cpu.count(status.CPUUsage, config.CPUThreshold, cpuConsecutiveSamples)
+	status.MemoryOverloaded = d.memory.count(status.MemoryUsage, config.MemoryThreshold, memoryConsecutiveSamples)
+	status.DiskOverloaded = d.disk.count(status.DiskUsage, config.DiskThreshold, diskConsecutiveSamples)
 }
 
-func countOverloadSample(samples *int, over bool) bool {
-	if !over {
-		*samples = 0
+func (s *overloadStreak) count(usage float64, threshold int, required int) bool {
+	// 阈值热改后，旧阈值下累计的次数不能算进新阈值。
+	if threshold != s.threshold {
+		*s = overloadStreak{threshold: threshold}
+	}
+	if !exceedsThreshold(usage, threshold) {
+		s.samples = 0
 		return false
 	}
-	*samples = min(*samples+1, overloadConsecutiveSamples)
-	return *samples == overloadConsecutiveSamples
+	s.samples = min(s.samples+1, required)
+	return s.samples == required
 }
 
 // exceedsThreshold 判断采样值是否超过阈值；阈值 <= 0 表示不检查该项。

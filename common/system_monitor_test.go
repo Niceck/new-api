@@ -10,9 +10,16 @@ import (
 
 // 移植自上游 09109ec31 的两组测试（去掉了容器口径部分），另加本站阈值 97 的取整边界。
 
-func TestSystemOverloadRequiresConsecutiveSamples(t *testing.T) {
+// sample 按 5 秒间隔推进采样时间，模拟采样 goroutine 的节奏。
+func sample(detector *overloadDetector, config PerformanceMonitorConfig, at time.Time, status SystemStatus) *SystemOverload {
+	status.SampledAt = at
+	detector.mark(&status, config)
+	return CheckSystemOverload(status, config, at)
+}
+
+func TestSystemOverloadRequiresConsecutiveCPUSamples(t *testing.T) {
 	config := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
-	now := time.Date(2026, 9, 11, 3, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 9, 11, 3, 0, 0, 0, time.UTC)
 	cpuSamples := []struct {
 		usage        float64
 		wantOverload bool
@@ -28,11 +35,9 @@ func TestSystemOverloadRequiresConsecutiveSamples(t *testing.T) {
 	}
 
 	var detector overloadDetector
-	for i, sample := range cpuSamples {
-		status := SystemStatus{CPUUsage: sample.usage, SampledAt: now}
-		detector.mark(&status, config)
-		overload := CheckSystemOverload(status, config, now)
-		if !sample.wantOverload {
+	for i, s := range cpuSamples {
+		overload := sample(&detector, config, start.Add(time.Duration(i)*systemMonitorInterval), SystemStatus{CPUUsage: s.usage})
+		if !s.wantOverload {
 			assert.Nil(t, overload, "sample %d", i+1)
 			continue
 		}
@@ -41,40 +46,81 @@ func TestSystemOverloadRequiresConsecutiveSamples(t *testing.T) {
 	}
 }
 
-func TestSystemOverloadCountsEachResourceSeparately(t *testing.T) {
+func TestSystemOverloadMemoryAndDiskRejectOnFirstSample(t *testing.T) {
 	config := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 97, MemoryThreshold: 90, DiskThreshold: 95}
-	now := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
+
 	var detector overloadDetector
-	// CPU 与内存交替超阈值：每一项都没有连续 3 次，不熔断。
-	samples := []SystemStatus{
-		{CPUUsage: 99, MemoryUsage: 10},
-		{CPUUsage: 10, MemoryUsage: 95},
-		{CPUUsage: 99, MemoryUsage: 10},
-		{CPUUsage: 10, MemoryUsage: 95},
+	assert.Nil(t, sample(&detector, config, start, SystemStatus{MemoryUsage: 50, DiskUsage: 50}))
+	overload := sample(&detector, config, start.Add(systemMonitorInterval), SystemStatus{MemoryUsage: 99})
+	require.NotNil(t, overload, "内存逼近耗尽时不等连续采样")
+	assert.Equal(t, "system_memory_overloaded", overload.Code)
+
+	detector = overloadDetector{}
+	overload = sample(&detector, config, start, SystemStatus{DiskUsage: 99})
+	require.NotNil(t, overload, "磁盘逼近写满时不等连续采样")
+	assert.Equal(t, "system_disk_overloaded", overload.Code)
+}
+
+func TestSystemOverloadCPUStreakIgnoresOtherResources(t *testing.T) {
+	config := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 97}
+	start := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
+	var detector overloadDetector
+	// CPU 隔一次超一次：始终凑不满连续 3 次。
+	for i, usage := range []float64{99, 10, 99, 10, 99} {
+		assert.Nil(t, sample(&detector, config, start.Add(time.Duration(i)*systemMonitorInterval), SystemStatus{CPUUsage: usage}), "sample %d", i+1)
 	}
-	for i := range samples {
-		status := samples[i]
-		status.SampledAt = now
-		detector.mark(&status, config)
-		assert.Nil(t, CheckSystemOverload(status, config, now), "sample %d", i+1)
-	}
+}
+
+func TestSystemOverloadThresholdChangeResetsStreak(t *testing.T) {
+	start := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
+	at := func(i int) time.Time { return start.Add(time.Duration(i) * systemMonitorInterval) }
+	low := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90}
+	high := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 97}
+
+	var detector overloadDetector
+	assert.Nil(t, sample(&detector, low, at(0), SystemStatus{CPUUsage: 91}))
+	assert.Nil(t, sample(&detector, low, at(1), SystemStatus{CPUUsage: 91}))
+	// 调高到 97 后只有这一次超过新阈值，不能借旧阈值下的两次凑满。
+	assert.Nil(t, sample(&detector, high, at(2), SystemStatus{CPUUsage: 99}))
+	assert.Nil(t, sample(&detector, high, at(3), SystemStatus{CPUUsage: 99}))
+	overload := sample(&detector, high, at(4), SystemStatus{CPUUsage: 99})
+	require.NotNil(t, overload)
+	assert.Equal(t, "system cpu overloaded (current: 99.0%, threshold: 97%)", overload.Error())
+}
+
+func TestSystemOverloadSampleGapResetsStreak(t *testing.T) {
+	config := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90}
+	start := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
+
+	var detector overloadDetector
+	assert.Nil(t, sample(&detector, config, start, SystemStatus{CPUUsage: 99}))
+	assert.Nil(t, sample(&detector, config, start.Add(5*time.Second), SystemStatus{CPUUsage: 99}))
+	// 监控被阻塞一分钟后恢复：之前的两次作废，这一次重新从 1 计。
+	resumed := start.Add(65 * time.Second)
+	assert.Nil(t, sample(&detector, config, resumed, SystemStatus{CPUUsage: 99}))
+	assert.Nil(t, sample(&detector, config, resumed.Add(5*time.Second), SystemStatus{CPUUsage: 99}))
+	require.NotNil(t, sample(&detector, config, resumed.Add(10*time.Second), SystemStatus{CPUUsage: 99}))
+
+	// 间隔恰好等于上限仍算连续。
+	detector = overloadDetector{}
+	assert.Nil(t, sample(&detector, config, start, SystemStatus{CPUUsage: 99}))
+	assert.Nil(t, sample(&detector, config, start.Add(maxSampleGap), SystemStatus{CPUUsage: 99}))
+	require.NotNil(t, sample(&detector, config, start.Add(2*maxSampleGap), SystemStatus{CPUUsage: 99}))
 }
 
 func TestSystemOverloadThresholdUsesIntegerPart(t *testing.T) {
 	// 与旧判定一致：int(97.9) = 97，不大于阈值 97。
 	config := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 97}
-	now := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC)
 	var detector overloadDetector
-	for i := 0; i < overloadConsecutiveSamples+1; i++ {
-		status := SystemStatus{CPUUsage: 97.9, SampledAt: now}
-		detector.mark(&status, config)
-		assert.Nil(t, CheckSystemOverload(status, config, now), "sample %d", i+1)
+	for i := 0; i < cpuConsecutiveSamples+1; i++ {
+		assert.Nil(t, sample(&detector, config, start.Add(time.Duration(i)*systemMonitorInterval), SystemStatus{CPUUsage: 97.9}), "sample %d", i+1)
 	}
-	for i := 0; i < overloadConsecutiveSamples; i++ {
-		status := SystemStatus{CPUUsage: 98.0, SampledAt: now}
-		detector.mark(&status, config)
-		overload := CheckSystemOverload(status, config, now)
-		if i < overloadConsecutiveSamples-1 {
+	next := start.Add(time.Duration(cpuConsecutiveSamples+1) * systemMonitorInterval)
+	for i := 0; i < cpuConsecutiveSamples; i++ {
+		overload := sample(&detector, config, next.Add(time.Duration(i)*systemMonitorInterval), SystemStatus{CPUUsage: 98.0})
+		if i < cpuConsecutiveSamples-1 {
 			assert.Nil(t, overload, "sample %d", i+1)
 			continue
 		}
