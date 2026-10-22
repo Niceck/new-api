@@ -223,3 +223,55 @@ func TestRedisFailurePolicies(t *testing.T) {
 	assert.Empty(t, userResponse.Body.String())
 	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
 }
+
+func TestRedisAuthRefreshRateLimitUsesItsOwnCounter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	redisServer, _ := useRateLimitMiniRedis(t)
+
+	previousCriticalEnable := common.CriticalRateLimitEnable
+	previousCriticalNum := common.CriticalRateLimitNum
+	previousCriticalDuration := common.CriticalRateLimitDuration
+	previousRefreshEnable := common.AuthRefreshRateLimitEnable
+	previousRefreshNum := common.AuthRefreshRateLimitNum
+	previousRefreshDuration := common.AuthRefreshRateLimitDuration
+	common.CriticalRateLimitEnable = true
+	common.CriticalRateLimitNum = 1
+	common.CriticalRateLimitDuration = 37
+	common.AuthRefreshRateLimitEnable = true
+	common.AuthRefreshRateLimitNum = 2
+	common.AuthRefreshRateLimitDuration = 41
+	t.Cleanup(func() {
+		common.CriticalRateLimitEnable = previousCriticalEnable
+		common.CriticalRateLimitNum = previousCriticalNum
+		common.CriticalRateLimitDuration = previousCriticalDuration
+		common.AuthRefreshRateLimitEnable = previousRefreshEnable
+		common.AuthRefreshRateLimitNum = previousRefreshNum
+		common.AuthRefreshRateLimitDuration = previousRefreshDuration
+	})
+
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	router.GET("/refresh", AuthRefreshRateLimit(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/login", CriticalRateLimit(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	const remoteAddr = "192.0.2.70:12345"
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/refresh", remoteAddr).Code)
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/refresh", remoteAddr).Code)
+	limited := performRateLimitRequest(router, "/refresh", remoteAddr)
+	assert.Equal(t, http.StatusTooManyRequests, limited.Code)
+	assert.Equal(t, "41", limited.Header().Get("Retry-After"))
+
+	refreshKey := redisIPRateLimitKey("AR", "192.0.2.70")
+	count, err := redisServer.Get(refreshKey)
+	require.NoError(t, err)
+	assert.Equal(t, "3", count)
+	assert.Equal(t, 41*time.Second, redisServer.TTL(refreshKey))
+	assert.False(t, redisServer.Exists(redisIPRateLimitKey("CT", "192.0.2.70")), "refresh must not touch the sensitive-route counter")
+
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/login", remoteAddr).Code)
+	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/login", remoteAddr).Code)
+}

@@ -130,6 +130,11 @@ func InitEnv() {
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
 
+	// 未单独设置时跟随 CRITICAL_RATE_LIMIT_ENABLE，关掉敏感路由限流的部署行为不变。
+	AuthRefreshRateLimitEnable = GetEnvOrDefaultBool("AUTH_REFRESH_RATE_LIMIT_ENABLE", CriticalRateLimitEnable)
+	AuthRefreshRateLimitNum = GetEnvOrDefault("AUTH_REFRESH_RATE_LIMIT", 120)
+	AuthRefreshRateLimitDuration = int64(GetEnvOrDefault("AUTH_REFRESH_RATE_LIMIT_DURATION", 20*60))
+
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))

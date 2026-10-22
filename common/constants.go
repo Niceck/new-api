@@ -222,6 +222,12 @@ var (
 	CriticalRateLimitNum            = 20
 	CriticalRateLimitDuration int64 = 20 * 60
 
+	// Session refresh runs once per full page load of the console, so it has
+	// its own per-IP budget instead of sharing the login/payment one above.
+	AuthRefreshRateLimitEnable   bool
+	AuthRefreshRateLimitNum            = 120
+	AuthRefreshRateLimitDuration int64 = 20 * 60
+
 	UploadRateLimitNum            = 10
 	UploadRateLimitDuration int64 = 60
 
