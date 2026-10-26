@@ -194,17 +194,14 @@ describe('resolveModelApiBase', () => {
     })
   })
 
-  test('restricted groups with different entries fall back to the site base and list each', () => {
+  test('restricted groups with different entries use the first entry and list the others', () => {
     const status = {
       ...STATUS,
-      group_entry_host: { a: 'a.yzzt.top', b: 'b.yzzt.top' },
+      group_entry_host: { a: 'a.yzzt.top', b: 'b.yzzt.top', c: 'a.yzzt.top' },
     }
-    assert.deepEqual(resolve(['a', 'b'], status), {
-      apiBase: 'https://cc.yzzt.top',
-      entryHints: [
-        { group: 'a', apiBase: 'https://a.yzzt.top' },
-        { group: 'b', apiBase: 'https://b.yzzt.top' },
-      ],
+    assert.deepEqual(resolve(['a', 'b', 'c'], status), {
+      apiBase: 'https://a.yzzt.top',
+      entryHints: [{ group: 'b', apiBase: 'https://b.yzzt.top' }],
     })
   })
 

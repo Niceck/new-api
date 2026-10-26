@@ -99,7 +99,8 @@ export type GroupEntryHint = { group: string; apiBase: string }
 
 /**
  * 模型广场代码示例的接入地址（不针对某个令牌，按模型所在的分组）：
- * - 模型所在的分组全都限定了同一个入口：模型只能在那里调用，用那个入口；
+ * - 模型所在的分组全都限定了入口：站点地址对哪个分组都不通，用第一个分组的入口，
+ *   入口与它不同的分组列出来；
  * - 否则用站点地址，并把限定了入口的分组列出来（这些分组的令牌要改用各自的入口）。
  * groups 来自接口数据，逐项校验，非字符串与空串忽略、重复的只算一次。
  */
@@ -119,19 +120,16 @@ export function resolveModelApiBase(params: {
   const restricted = groups
     .map((group) => ({ group, host: resolveEntryHost(params.status, group) }))
     .filter((entry) => entry.host !== '')
-  const hosts = new Set(restricted.map((entry) => entry.host))
-  if (
-    groups.length > 0 &&
-    restricted.length === groups.length &&
-    hosts.size === 1
-  ) {
-    return { apiBase: `${protocol}//${restricted[0].host}`, entryHints: [] }
+  const hint = (entry: { group: string; host: string }): GroupEntryHint => ({
+    group: entry.group,
+    apiBase: `${protocol}//${entry.host}`,
+  })
+  if (groups.length > 0 && restricted.length === groups.length) {
+    const chosen = restricted[0].host
+    return {
+      apiBase: `${protocol}//${chosen}`,
+      entryHints: restricted.filter((e) => e.host !== chosen).map(hint),
+    }
   }
-  return {
-    apiBase: siteBase,
-    entryHints: restricted.map((entry) => ({
-      group: entry.group,
-      apiBase: `${protocol}//${entry.host}`,
-    })),
-  }
+  return { apiBase: siteBase, entryHints: restricted.map(hint) }
 }
