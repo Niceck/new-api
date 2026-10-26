@@ -5378,6 +5378,7 @@
     "Amount credited": "Amount credited",
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Paid less than the amount due, so it was credited in proportion and this order is settled",
     "Paid more than the amount due, so the face value of the order was credited": "Paid more than the amount due, so the face value of the order was credited",
-    "Credited {{credited}} for {{received}} USDT received": "Credited {{credited}} for {{received}} USDT received"
+    "Credited {{credited}} for {{received}} USDT received": "Credited {{credited}} for {{received}} USDT received",
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Tokens in the {{group}} group must use {{url}} as the base URL"
   }
 }

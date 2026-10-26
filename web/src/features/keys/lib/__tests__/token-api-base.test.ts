@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { resolveSiteBase, resolveTokenApiBase } from '../token-api-base'
+import {
+  resolveModelApiBase,
+  resolveSiteBase,
+  resolveTokenApiBase,
+} from '../token-api-base'
 
 const ORIGIN = 'https://cc.yzzt.top:2053'
 
@@ -154,5 +158,97 @@ describe('resolveTokenApiBase', () => {
       }),
       'https://cc.yzzt.top:2087'
     )
+  })
+})
+
+describe('resolveModelApiBase', () => {
+  const resolve = (groups: unknown, status: Record<string, unknown> = STATUS) =>
+    resolveModelApiBase({ status, groups, origin: ORIGIN })
+
+  test('a model outside restricted groups uses the site base, not server_address', () => {
+    assert.deepEqual(resolve(['满血稳定claude']), {
+      apiBase: 'https://cc.yzzt.top',
+      entryHints: [],
+    })
+  })
+
+  test('a model shared with a restricted group uses the site base and lists that entry', () => {
+    assert.deepEqual(resolve(['claude kiro', '满血稳定claude']), {
+      apiBase: 'https://cc.yzzt.top',
+      entryHints: [{ group: 'claude kiro', apiBase: 'https://kiro.yzzt.top' }],
+    })
+  })
+
+  test('a model only in restricted groups sharing one entry uses that entry', () => {
+    assert.deepEqual(resolve(['claude kiro']), {
+      apiBase: 'https://kiro.yzzt.top',
+      entryHints: [],
+    })
+    const status = {
+      ...STATUS,
+      group_entry_host: { a: 'kiro.yzzt.top', b: 'kiro.yzzt.top' },
+    }
+    assert.deepEqual(resolve(['a', 'b'], status), {
+      apiBase: 'https://kiro.yzzt.top',
+      entryHints: [],
+    })
+  })
+
+  test('restricted groups with different entries fall back to the site base and list each', () => {
+    const status = {
+      ...STATUS,
+      group_entry_host: { a: 'a.yzzt.top', b: 'b.yzzt.top' },
+    }
+    assert.deepEqual(resolve(['a', 'b'], status), {
+      apiBase: 'https://cc.yzzt.top',
+      entryHints: [
+        { group: 'a', apiBase: 'https://a.yzzt.top' },
+        { group: 'b', apiBase: 'https://b.yzzt.top' },
+      ],
+    })
+  })
+
+  test('no groups, or malformed groups, use the site base', () => {
+    for (const groups of [[], undefined, null, 'claude kiro', [42, '']]) {
+      assert.deepEqual(
+        resolve(groups),
+        { apiBase: 'https://cc.yzzt.top', entryHints: [] },
+        JSON.stringify(groups)
+      )
+    }
+  })
+
+  test('duplicate groups are listed once', () => {
+    assert.deepEqual(
+      resolve(['claude kiro', '满血稳定claude', 'claude kiro']).entryHints,
+      [{ group: 'claude kiro', apiBase: 'https://kiro.yzzt.top' }]
+    )
+  })
+
+  test('the dedicated entry keeps the site protocol', () => {
+    const status = { ...STATUS, api_base_url: 'http://localhost:3000' }
+    assert.deepEqual(resolve(['claude kiro'], status), {
+      apiBase: 'http://kiro.yzzt.top',
+      entryHints: [],
+    })
+  })
+
+  test('malformed group_entry_host values are ignored', () => {
+    const status = {
+      ...STATUS,
+      group_entry_host: { 'claude kiro': 'kiro.yzzt.top:2087' },
+    }
+    assert.deepEqual(resolve(['claude kiro'], status), {
+      apiBase: 'https://cc.yzzt.top',
+      entryHints: [],
+    })
+  })
+
+  test('an older backend without the new fields keeps server_address', () => {
+    const status = { server_address: 'https://cc.yzzt.top:2087' }
+    assert.deepEqual(resolve(['claude kiro', '满血稳定claude'], status), {
+      apiBase: 'https://cc.yzzt.top:2087',
+      entryHints: [],
+    })
   })
 })

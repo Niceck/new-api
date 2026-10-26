@@ -5378,6 +5378,7 @@
     "Amount credited": "實際入帳",
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "到帳少於應付金額，已按比例入帳，本單已結清",
     "Paid more than the amount due, so the face value of the order was credited": "到帳多於應付金額，已按訂單面值入帳",
-    "Credited {{credited}} for {{received}} USDT received": "實到 {{received}} USDT，實際入帳 {{credited}}"
+    "Credited {{credited}} for {{received}} USDT received": "實到 {{received}} USDT，實際入帳 {{credited}}",
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "{{group}} 分組的令牌請把介面位址（Base URL）改為 {{url}}"
   }
 }

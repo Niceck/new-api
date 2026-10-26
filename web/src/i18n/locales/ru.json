@@ -5379,6 +5379,7 @@
     "Amount credited": "Зачислено",
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Поступило меньше суммы к оплате: зачислено пропорционально, заказ закрыт",
     "Paid more than the amount due, so the face value of the order was credited": "Поступило больше суммы к оплате: зачислен номинал заказа",
-    "Credited {{credited}} for {{received}} USDT received": "Зачислено {{credited}} за поступившие {{received}} USDT"
+    "Credited {{credited}} for {{received}} USDT received": "Зачислено {{credited}} за поступившие {{received}} USDT",
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Токены группы {{group}} должны использовать {{url}} в качестве базового URL"
   }
 }

@@ -38,6 +38,7 @@ import {
 } from '@/components/data-table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { resolveModelApiBase } from '@/features/keys/lib/token-api-base'
 import { useStatus } from '@/hooks/use-status'
 
 import {
@@ -447,18 +448,20 @@ function CodeSamplesSection(props: {
   const { t } = useTranslation()
   const { status } = useStatus()
 
-  const baseUrl = useMemo(() => {
-    const candidate =
-      (status as Record<string, unknown> | null)?.server_address ??
-      (status as Record<string, unknown> | null)?.serverAddress ??
-      (status?.data as Record<string, unknown> | undefined)?.server_address ??
-      (status?.data as Record<string, unknown> | undefined)?.serverAddress
-    if (candidate && typeof candidate === 'string') {
-      return candidate.replace(/\/$/, '')
-    }
-    if (typeof window !== 'undefined') return window.location.origin
-    return 'https://api.example.com'
-  }, [status])
+  // 对客接口地址 api_base_url 优先：server_address 同时是支付回调地址，可能带着老端口。
+  // 模型只在限定了入口的分组里时用那个入口；与别的分组共用时另起一行提示那些分组的入口。
+  const { apiBase: baseUrl, entryHints } = useMemo(
+    () =>
+      resolveModelApiBase({
+        status: status as Record<string, unknown> | null,
+        groups: props.model.enable_groups,
+        origin:
+          typeof window !== 'undefined'
+            ? window.location.origin
+            : 'https://api.example.com',
+      }),
+    [status, props.model.enable_groups]
+  )
 
   const endpoints = useMemo(() => {
     const types = props.model.supported_endpoint_types || []
@@ -536,6 +539,15 @@ function CodeSamplesSection(props: {
           <CodeBlockCopyButton />
         </CodeBlock>
       </div>
+
+      {entryHints.map((hint) => (
+        <p key={hint.group} className='text-muted-foreground mt-2 text-xs'>
+          {t('Tokens in the {{group}} group must use {{url}} as the base URL', {
+            group: hint.group,
+            url: hint.apiBase,
+          })}
+        </p>
+      ))}
 
       <p className='text-muted-foreground mt-2 text-xs'>
         {t('Replace')}{' '}

@@ -5379,6 +5379,7 @@
     "Amount credited": "Số tiền đã ghi có",
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Số tiền nhận được ít hơn số cần thanh toán nên đã ghi có theo tỷ lệ và đơn này đã tất toán",
     "Paid more than the amount due, so the face value of the order was credited": "Số tiền nhận được nhiều hơn số cần thanh toán nên đã ghi có theo mệnh giá của đơn",
-    "Credited {{credited}} for {{received}} USDT received": "Đã ghi có {{credited}} cho {{received}} USDT nhận được"
+    "Credited {{credited}} for {{received}} USDT received": "Đã ghi có {{credited}} cho {{received}} USDT nhận được",
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Token thuộc nhóm {{group}} phải dùng {{url}} làm Base URL"
   }
 }

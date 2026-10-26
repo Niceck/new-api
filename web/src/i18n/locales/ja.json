@@ -5379,6 +5379,7 @@
     "Amount credited": "反映額",
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "着金額がお支払い金額より少なかったため、割合に応じて反映され、この注文は完了しました",
     "Paid more than the amount due, so the face value of the order was credited": "着金額がお支払い金額より多かったため、注文の額面どおりに反映されました",
-    "Credited {{credited}} for {{received}} USDT received": "着金 {{received}} USDT、反映額 {{credited}}"
+    "Credited {{credited}} for {{received}} USDT received": "着金 {{received}} USDT、反映額 {{credited}}",
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "{{group}} グループのトークンは Base URL を {{url}} に変更してください"
   }
 }

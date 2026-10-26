@@ -23,6 +23,8 @@ For commercial licensing, please contact support@quantumnous.com
 // - 分组限定了入口（/api/status 的 group_entry_host）时，这个分组的令牌只能走那个入口，
 //   在别的地址会被拒绝，所以用那个入口的主机名，协议沿用站点地址的。
 // - 令牌没选分组时按账号分组计费和限入口（与后端一致），这里也按账号分组算。
+//
+// 模型广场的代码示例不针对某个令牌，按模型所在的分组给地址，见 resolveModelApiBase。
 
 type StatusLike = Record<string, unknown> | null | undefined
 
@@ -91,4 +93,45 @@ export function resolveTokenApiBase(params: {
   const host = resolveEntryHost(params.status, group)
   if (!host) return siteBase
   return `${protocolOf(siteBase)}//${host}`
+}
+
+export type GroupEntryHint = { group: string; apiBase: string }
+
+/**
+ * 模型广场代码示例的接入地址（不针对某个令牌，按模型所在的分组）：
+ * - 模型所在的分组全都限定了同一个入口：模型只能在那里调用，用那个入口；
+ * - 否则用站点地址，并把限定了入口的分组列出来（这些分组的令牌要改用各自的入口）。
+ * groups 来自接口数据，逐项校验，非字符串与空串忽略、重复的只算一次。
+ */
+export function resolveModelApiBase(params: {
+  status: StatusLike
+  groups: unknown
+  origin: string
+}): { apiBase: string; entryHints: GroupEntryHint[] } {
+  const siteBase = resolveSiteBase(params.status, params.origin)
+  const raw = Array.isArray(params.groups) ? params.groups : []
+  const groups = [
+    ...new Set(
+      raw.filter((g): g is string => typeof g === 'string' && g !== '')
+    ),
+  ]
+  const protocol = protocolOf(siteBase)
+  const restricted = groups
+    .map((group) => ({ group, host: resolveEntryHost(params.status, group) }))
+    .filter((entry) => entry.host !== '')
+  const hosts = new Set(restricted.map((entry) => entry.host))
+  if (
+    groups.length > 0 &&
+    restricted.length === groups.length &&
+    hosts.size === 1
+  ) {
+    return { apiBase: `${protocol}//${restricted[0].host}`, entryHints: [] }
+  }
+  return {
+    apiBase: siteBase,
+    entryHints: restricted.map((entry) => ({
+      group: entry.group,
+      apiBase: `${protocol}//${entry.host}`,
+    })),
+  }
 }

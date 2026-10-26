@@ -5379,6 +5379,7 @@
     "Amount credited": "Montant crédité",
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Montant reçu inférieur au montant dû : crédité au prorata, cette commande est soldée",
     "Paid more than the amount due, so the face value of the order was credited": "Montant reçu supérieur au montant dû : la valeur nominale de la commande a été créditée",
-    "Credited {{credited}} for {{received}} USDT received": "{{credited}} crédité pour {{received}} USDT reçus"
+    "Credited {{credited}} for {{received}} USDT received": "{{credited}} crédité pour {{received}} USDT reçus",
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Les jetons du groupe {{group}} doivent utiliser {{url}} comme URL de base"
   }
 }
