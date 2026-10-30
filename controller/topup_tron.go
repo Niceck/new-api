@@ -33,7 +33,7 @@ var (
 	tronControllerTxIDPattern = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 	getTronTopupOperations    = defaultTronTopupOperations
 	getTronUserGroup          = model.GetUserGroup
-	calculateTronPaymentMoney = getPayMoney
+	calculateTronPaymentMoney = quoteTronPayMoney
 	getTronPublicConfig       = service.GetTronTopupPublicConfig
 )
 
@@ -79,7 +79,13 @@ func CreateTronTopupOrder(c *gin.Context) {
 		common.ApiErrorMsg(c, "获取用户分组失败")
 		return
 	}
-	payCNY := decimal.NewFromFloat(calculateTronPaymentMoney(request.Amount, group))
+	payMoneyCNY, err := calculateTronPaymentMoney(request.Amount, group, userID)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("TRON 读取充值等级失败 user_id=%d amount=%d error=%q", userID, request.Amount, err.Error()))
+		common.ApiErrorMsg(c, topUpTierUnavailableMessage)
+		return
+	}
+	payCNY := decimal.NewFromFloat(payMoneyCNY)
 	if !payCNY.IsPositive() {
 		common.ApiErrorMsg(c, "充值金额无效")
 		return

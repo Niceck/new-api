@@ -754,3 +754,20 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 
 	return nil
 }
+
+// GetUserTopUpFaceTotal 用户历史成功充值的到账面值合计（下单口径的整数单位），累计充值等级按它定级。
+// 只算 top_ups 里 status=success 的订单：待付 / 过期的不算；兑换码、后台加额度、赠送不在这张表里，也不算。
+// 没充过值返回 0 而不是错误；查库失败才返回错误（调用方据此拒绝下单，而不是静默按原价）。
+func GetUserTopUpFaceTotal(userId int) (int64, error) {
+	var row struct {
+		Total int64
+	}
+	err := DB.Model(&TopUp{}).
+		Select("COALESCE(SUM(amount), 0) AS total").
+		Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
+		Scan(&row).Error
+	if err != nil {
+		return 0, err
+	}
+	return row.Total, nil
+}

@@ -227,6 +227,16 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "payment_setting.tier_discount":
+		// 配置框架对解析失败是静默跳过的；累计充值等级又直接决定应付金额，所以写入前必须在这里拦住。
+		err = operation_setting.ValidateTierDiscountJSON(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "gemini.safety_settings":
 		err = model_setting.ValidateGeminiSafetySettings(option.Value.(string))
 		if err != nil {

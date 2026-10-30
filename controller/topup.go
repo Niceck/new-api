@@ -144,6 +144,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
+		"tier":                    topUpTierInfo(c),
 		"topup_link":              common.TopUpLink,
 	}
 	common.ApiSuccess(c, data)
@@ -172,7 +173,42 @@ func GetEpayClient() *epay.Client {
 	return withUrl
 }
 
+// topUpTierUnavailableMessage 配置了累计充值等级、却读不出用户累计时给客户的话：
+// 不静默按原价建单，让他稍后重试（2026-10-30 站长定）。
+const topUpTierUnavailableMessage = "获取充值等级失败，请稍后重试"
+
+// getUserTopUpFaceTotal 读用户累计到账面值；做成变量便于测试替换。
+var getUserTopUpFaceTotal = model.GetUserTopUpFaceTotal
+
+// topUpQuote 一次下单 / 试算的应付金额与它用上的折扣。
+type topUpQuote struct {
+	Money    float64
+	Discount float64                      // 实际采用的折扣，1 = 原价
+	Tier     *operation_setting.TopUpTier // 采用了等级折扣时非空
+	Total    int64                        // 累计到账面值（配置了等级时才读）
+}
+
+func (q topUpQuote) tierLevel() int {
+	if q.Tier == nil {
+		return 0
+	}
+	return q.Tier.Level
+}
+
+// getPayMoney 只按单笔档位折扣算应付金额：Stripe / Creem / Waffo 这些没接入等级的路径与老测试仍用它。
 func getPayMoney(amount int64, group string) float64 {
+	return payMoneyWithDiscount(amount, group, amountDiscountFor(amount))
+}
+
+// amountDiscountFor 单笔档位折扣：充值数量恰好等于某一档才有，否则 1。
+func amountDiscountFor(amount int64) float64 {
+	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok && ds > 0 {
+		return ds
+	}
+	return 1.0
+}
+
+func payMoneyWithDiscount(amount int64, group string, discount float64) float64 {
 	dAmount := decimal.NewFromInt(amount)
 	// 充值金额以“展示类型”为准：
 	// - USD/CNY: 前端传 amount 为金额单位；TOKENS: 前端传 tokens，需要换成 USD 金额
@@ -188,18 +224,67 @@ func getPayMoney(amount int64, group string) float64 {
 
 	dTopupGroupRatio := decimal.NewFromFloat(topupGroupRatio)
 	dPrice := decimal.NewFromFloat(operation_setting.Price)
-	// apply optional preset discount by the original request amount (if configured), default 1.0
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
-	}
 	dDiscount := decimal.NewFromFloat(discount)
 
 	payMoney := dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
 
 	return payMoney.InexactFloat64()
+}
+
+// quoteTopUp 下单与试算共用的应付金额：单笔档位折扣与累计充值等级折扣取对客户更优的一个，不叠加。
+// 没配置等级时不读数据库，行为与以前完全一样。配置了等级而累计读不出来时返回错误：
+// 宁可让客户稍后重试，也不静默按原价建单。
+func quoteTopUp(amount int64, group string, userId int) (topUpQuote, error) {
+	quote := topUpQuote{Discount: amountDiscountFor(amount)}
+	tiers := operation_setting.TopUpTiers()
+	if len(tiers) > 0 {
+		total, err := getUserTopUpFaceTotal(userId)
+		if err != nil {
+			return topUpQuote{}, fmt.Errorf("读取用户 %d 的累计充值失败: %w", userId, err)
+		}
+		quote.Total = total
+		if current, _ := operation_setting.TierForTotal(tiers, total); current != nil && current.Discount < quote.Discount {
+			quote.Discount = current.Discount
+			quote.Tier = current
+		}
+	}
+	quote.Money = payMoneyWithDiscount(amount, group, quote.Discount)
+	return quote, nil
+}
+
+// quoteTronPayMoney USDT 建单用的同一口径（topup_tron.go 的 calculateTronPaymentMoney）。
+func quoteTronPayMoney(amount int64, group string, userId int) (float64, error) {
+	quote, err := quoteTopUp(amount, group, userId)
+	return quote.Money, err
+}
+
+// topUpTierInfo 钱包页要显示的等级信息；没配置等级时为 nil。读累计失败只记日志、返回 nil：
+// 钱包页照常打开，下单时会再读一次并明确报错。
+func topUpTierInfo(c *gin.Context) gin.H {
+	tiers := operation_setting.TopUpTiers()
+	if len(tiers) == 0 {
+		return nil
+	}
+	userId := c.GetInt("id")
+	total, err := getUserTopUpFaceTotal(userId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("充值等级 读取累计充值失败 user_id=%d error=%q", userId, err.Error()))
+		return nil
+	}
+	current, next := operation_setting.TierForTotal(tiers, total)
+	info := gin.H{"total": total, "level": 0, "discount": 1.0, "tiers": tiers}
+	if current != nil {
+		info["level"] = current.Level
+		info["discount"] = current.Discount
+		info["threshold"] = current.Threshold
+	}
+	if next != nil {
+		info["next_level"] = next.Level
+		info["next_threshold"] = next.Threshold
+		info["next_discount"] = next.Discount
+		info["remaining"] = next.Threshold - total
+	}
+	return info
 }
 
 func getMinTopup() int64 {
@@ -234,7 +319,13 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	payMoney := getPayMoney(req.Amount, group)
+	quote, err := quoteTopUp(req.Amount, group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
+	payMoney := quote.Money
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -299,7 +390,7 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, payMoney, uri, common.GetJsonString(params)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f discount=%.2f tier_level=%d uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, payMoney, quote.Discount, quote.tierLevel(), uri, common.GetJsonString(params)))
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
 }
 
@@ -470,12 +561,18 @@ func RequestAmount(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	group, err := model.GetUserGroup(id, true)
+	group, err := getTopUpUserGroup(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	payMoney := getPayMoney(req.Amount, group)
+	quote, err := quoteTopUp(req.Amount, group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("试算 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
+	payMoney := quote.Money
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return

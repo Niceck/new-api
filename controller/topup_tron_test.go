@@ -90,7 +90,7 @@ func withTronControllerDependencies(t *testing.T, operations *stubTronTopupOpera
 	originalCompliance := isTopupComplianceConfirmed
 	getTronTopupOperations = func() (tronTopupOperations, error) { return operations, nil }
 	getTronUserGroup = func(_ int, _ bool) (string, error) { return "default", nil }
-	calculateTronPaymentMoney = func(_ int64, _ string) float64 { return 100 }
+	calculateTronPaymentMoney = func(_ int64, _ string, _ int) (float64, error) { return 100, nil }
 	getTronPublicConfig = func() (service.TronTopupConfig, bool) {
 		return service.TronTopupConfig{Enabled: true, Network: "mainnet", ReceiveAddress: "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f"}, true
 	}
