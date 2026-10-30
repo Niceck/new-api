@@ -5389,6 +5389,7 @@
     "Top up {{amount}} more to reach VIP{{level}}": "Nạp thêm {{amount}} để lên VIP{{level}}",
     "Highest level reached": "Đã đạt hạng cao nhất",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Ưu đãi theo hạng áp dụng cho mọi lần nạp; nếu ưu đãi theo mức nạp tốt hơn thì áp dụng mức đó, không cộng dồn",
-    "Progress to VIP{{level}}": "Tiến độ lên VIP{{level}}"
+    "Progress to VIP{{level}}": "Tiến độ lên VIP{{level}}",
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Hạng thành viên tạm thời không khả dụng; số tiền cần thanh toán vẫn do máy chủ tính"
   }
 }

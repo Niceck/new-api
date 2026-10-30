@@ -118,6 +118,7 @@ func GetTopUpInfo(c *gin.Context) {
 		tronTolerantMatch = tronConfig.TolerantMatchEnabled
 	}
 
+	tierInfo, tierUnavailable := topUpTierInfo(c)
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
@@ -144,8 +145,12 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
-		"tier":                    topUpTierInfo(c),
+		"tier":                    tierInfo,
 		"topup_link":              common.TopUpLink,
+	}
+	if tierUnavailable {
+		// 配置了等级但这次读不出累计：前端据此提示「等级暂不可用」，而不是显示成没配置
+		data["tier_unavailable"] = true
 	}
 	common.ApiSuccess(c, data)
 }
@@ -228,28 +233,38 @@ func payMoneyWithDiscount(amount int64, group string, discount float64) float64 
 
 	payMoney := dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
 
-	return payMoney.InexactFloat64()
+	// 量化到分再交出去：订单落库、试算展示与易支付的订单金额（EpayOrderMoney 格式化到两位）才是同一个数。
+	// 本站 Price 与分组充值倍率都是 1、折扣最多两位小数，这里本来就是整分；别的站点配置下也别留半分钱。
+	return payMoney.Round(2).InexactFloat64()
 }
 
-// quoteTopUp 下单与试算共用的应付金额：单笔档位折扣与累计充值等级折扣取对客户更优的一个，不叠加。
-// 没配置等级时不读数据库，行为与以前完全一样。配置了等级而累计读不出来时返回错误：
-// 宁可让客户稍后重试，也不静默按原价建单。
-func quoteTopUp(amount int64, group string, userId int) (topUpQuote, error) {
-	quote := topUpQuote{Discount: amountDiscountFor(amount)}
+// topUpDiscountFor 一次充值实际采用的折扣：单笔档位折扣与累计充值等级折扣取对客户更优的一个，不叠加。
+// 所有在线支付入口（易支付、USDT、Stripe、Waffo、Pancake）都从这里取折扣，前端按有效折扣显示的角标才
+// 与各渠道实际收款一致。没配置等级时不读数据库，行为与以前完全一样；配置了等级而累计读不出来时返回错误，
+// 调用方要拒绝下单让客户稍后重试，不能静默按原价建单。
+func topUpDiscountFor(amount int64, userId int) (discount float64, tier *operation_setting.TopUpTier, total int64, err error) {
+	discount = amountDiscountFor(amount)
 	tiers := operation_setting.TopUpTiers()
-	if len(tiers) > 0 {
-		total, err := getUserTopUpFaceTotal(userId)
-		if err != nil {
-			return topUpQuote{}, fmt.Errorf("读取用户 %d 的累计充值失败: %w", userId, err)
-		}
-		quote.Total = total
-		if current, _ := operation_setting.TierForTotal(tiers, total); current != nil && current.Discount < quote.Discount {
-			quote.Discount = current.Discount
-			quote.Tier = current
-		}
+	if len(tiers) == 0 {
+		return discount, nil, 0, nil
 	}
-	quote.Money = payMoneyWithDiscount(amount, group, quote.Discount)
-	return quote, nil
+	total, err = getUserTopUpFaceTotal(userId)
+	if err != nil {
+		return 0, nil, 0, fmt.Errorf("读取用户 %d 的累计充值失败: %w", userId, err)
+	}
+	if current, _ := operation_setting.TierForTotal(tiers, total); current != nil && current.Discount < discount {
+		return current.Discount, current, total, nil
+	}
+	return discount, nil, total, nil
+}
+
+// quoteTopUp 易支付下单、试算与 USDT 建单共用的应付金额。
+func quoteTopUp(amount int64, group string, userId int) (topUpQuote, error) {
+	discount, tier, total, err := topUpDiscountFor(amount, userId)
+	if err != nil {
+		return topUpQuote{}, err
+	}
+	return topUpQuote{Money: payMoneyWithDiscount(amount, group, discount), Discount: discount, Tier: tier, Total: total}, nil
 }
 
 // quoteTronPayMoney USDT 建单用的同一口径（topup_tron.go 的 calculateTronPaymentMoney）。
@@ -258,21 +273,21 @@ func quoteTronPayMoney(amount int64, group string, userId int) (float64, error) 
 	return quote.Money, err
 }
 
-// topUpTierInfo 钱包页要显示的等级信息；没配置等级时为 nil。读累计失败只记日志、返回 nil：
-// 钱包页照常打开，下单时会再读一次并明确报错。
-func topUpTierInfo(c *gin.Context) gin.H {
+// topUpTierInfo 钱包页要显示的等级信息；没配置等级时为 nil。读累计失败只记日志、返回 (nil, true)：
+// 钱包页照常打开并提示等级暂不可用，下单时会再读一次并明确报错。
+func topUpTierInfo(c *gin.Context) (info gin.H, unavailable bool) {
 	tiers := operation_setting.TopUpTiers()
 	if len(tiers) == 0 {
-		return nil
+		return nil, false
 	}
 	userId := c.GetInt("id")
 	total, err := getUserTopUpFaceTotal(userId)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("充值等级 读取累计充值失败 user_id=%d error=%q", userId, err.Error()))
-		return nil
+		return nil, true
 	}
 	current, next := operation_setting.TierForTotal(tiers, total)
-	info := gin.H{"total": total, "level": 0, "discount": 1.0, "tiers": tiers}
+	info = gin.H{"total": total, "level": 0, "discount": 1.0, "tiers": tiers}
 	if current != nil {
 		info["level"] = current.Level
 		info["discount"] = current.Discount
@@ -284,7 +299,7 @@ func topUpTierInfo(c *gin.Context) gin.H {
 		info["next_discount"] = next.Discount
 		info["remaining"] = next.Threshold - total
 	}
-	return info
+	return info, false
 }
 
 func getMinTopup() int64 {

@@ -86,7 +86,8 @@ func formatWaffoAmount(amount float64, currency string) string {
 // getWaffoPayMoney converts the user-facing amount to USD for Waffo payment.
 // Waffo only accepts USD, so this function handles the conversion from different
 // display types (USD/CNY/TOKENS) to the actual USD amount to charge.
-func getWaffoPayMoney(amount float64, group string) float64 {
+// 折扣与易支付同一口径（单笔档位与累计充值等级取优，见 topUpDiscountFor）；读累计失败时返回错误。
+func getWaffoPayMoney(amount float64, group string, userId int) (float64, error) {
 	originalAmount := amount
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		amount = amount / common.QuotaPerUnit
@@ -95,13 +96,11 @@ func getWaffoPayMoney(amount float64, group string) float64 {
 	if topupGroupRatio == 0 {
 		topupGroupRatio = 1
 	}
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(originalAmount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
+	discount, _, _, err := topUpDiscountFor(int64(originalAmount), userId)
+	if err != nil {
+		return 0, err
 	}
-	return amount * setting.WaffoUnitPrice * topupGroupRatio * discount
+	return amount * setting.WaffoUnitPrice * topupGroupRatio * discount, nil
 }
 
 type WaffoPayRequest struct {
@@ -131,7 +130,12 @@ func RequestWaffoAmount(c *gin.Context) {
 		return
 	}
 
-	payMoney := getWaffoPayMoney(float64(req.Amount), group)
+	payMoney, err := getWaffoPayMoney(float64(req.Amount), group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -198,7 +202,12 @@ func RequestWaffoPay(c *gin.Context) {
 	// resolvedPayMethodType/Name 为空时，Waffo 自动选择支付方式
 
 	group, _ := model.GetUserGroup(id, true)
-	payMoney := getWaffoPayMoney(float64(req.Amount), group)
+	payMoney, err := getWaffoPayMoney(float64(req.Amount), group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return

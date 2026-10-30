@@ -756,7 +756,10 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 }
 
 // GetUserTopUpFaceTotal 用户历史成功充值的到账面值合计（下单口径的整数单位），累计充值等级按它定级。
-// 只算 top_ups 里 status=success 的订单：待付 / 过期的不算；兑换码、后台加额度、赠送不在这张表里，也不算。
+// 只算 top_ups 里 status=success 的真实充值：待付 / 过期的不算；用余额购买（PaymentProviderBalance）
+// 不是钱进来，不算；兑换码、后台加额度、赠送不在这张表里，也不算。
+// 面值单位 = 下单口径（按货币展示时就是元）；按 tokens 展示时 Stripe 等渠道存的是原始 token 数，
+// 单位与易支付不一致，所以等级配置在 tokens 展示模式下被拒绝写入（见 ValidateTierDiscountJSON）。
 // 没充过值返回 0 而不是错误；查库失败才返回错误（调用方据此拒绝下单，而不是静默按原价）。
 func GetUserTopUpFaceTotal(userId int) (int64, error) {
 	var row struct {
@@ -764,7 +767,7 @@ func GetUserTopUpFaceTotal(userId int) (int64, error) {
 	}
 	err := DB.Model(&TopUp{}).
 		Select("COALESCE(SUM(amount), 0) AS total").
-		Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
+		Where("user_id = ? AND status = ? AND payment_provider <> ?", userId, common.TopUpStatusSuccess, PaymentProviderBalance).
 		Scan(&row).Error
 	if err != nil {
 		return 0, err

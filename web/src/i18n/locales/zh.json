@@ -5388,6 +5388,7 @@
     "Top up {{amount}} more to reach VIP{{level}}": "再充 {{amount}} 升级 VIP{{level}}",
     "Highest level reached": "已是最高等级",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "等级折扣适用于每一笔充值；单笔档位优惠更划算时按单笔算，两者不叠加",
-    "Progress to VIP{{level}}": "距离 VIP{{level}} 的进度"
+    "Progress to VIP{{level}}": "距离 VIP{{level}} 的进度",
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "会员等级信息暂时读取不到；应付金额仍由服务端按规则计算"
   }
 }

@@ -5389,6 +5389,7 @@
     "Top up {{amount}} more to reach VIP{{level}}": "Encore {{amount}} pour atteindre VIP{{level}}",
     "Highest level reached": "Niveau maximal atteint",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "La remise de niveau s'applique à chaque recharge ; si une remise par montant est plus avantageuse, c'est elle qui s'applique, sans cumul",
-    "Progress to VIP{{level}}": "Progression vers VIP{{level}}"
+    "Progress to VIP{{level}}": "Progression vers VIP{{level}}",
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Le niveau membre est momentanément indisponible ; le montant à payer reste calculé par le serveur"
   }
 }

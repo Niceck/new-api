@@ -28,12 +28,33 @@ func TestValidateTierDiscountJSON_RejectsBadShapes(t *testing.T) {
 		"高档反而更差":         `{"1000":0.95,"2500":0.97}`,
 		"折扣不是数字":         `{"1000":"九折"}`,
 		"写成 92 而不是 0.92": `{"1000":92}`,
+		"重复的门槛键":         `{"1000":0.98,"1000":0.97}`,
+		"前导零（解析后撞键）":     `{"1000":0.98,"01000":0.97}`,
+		"指数写法的门槛":        `{"1e3":0.98}`,
+		"带正号的门槛":         `{"+1000":0.98}`,
+		"浮点尾数":           `{"1000":0.9700000000000001}`,
+		"门槛超过上限":         `{"10000000000":0.98}`,
 	}
 	for name, value := range cases {
 		err := ValidateTierDiscountJSON(value)
 		require.Error(t, err, name)
 		assert.ErrorIs(t, err, ErrTierDiscountInvalid, name)
 	}
+}
+
+func TestValidateTierDiscountJSON_RefusesTiersInTokensDisplay(t *testing.T) {
+	general := GetGeneralSetting()
+	original := general.QuotaDisplayType
+	general.QuotaDisplayType = QuotaDisplayTypeTokens
+	t.Cleanup(func() { general.QuotaDisplayType = original })
+	// 按 tokens 展示时 Stripe 等渠道的订单面值是原始 token 数，与易支付的单位不一致，累计会算错
+	assert.ErrorIs(t, ValidateTierDiscountJSON(`{"1000":0.98}`), ErrTierDiscountInvalid)
+	assert.NoError(t, ValidateTierDiscountJSON(`{}`), "关闭等级随时可以")
+}
+
+func TestValidateTierDiscountJSON_AcceptsEquivalentDecimalSpellings(t *testing.T) {
+	require.NoError(t, ValidateTierDiscountJSON(`{"1000":0.980,"2500":0.97}`), "0.980 的值仍是两位小数")
+	require.NoError(t, ValidateTierDiscountJSON(`{ "1000" : 0.98 , "2500":0.97 }`), "空白不影响")
 }
 
 func TestValidateTierDiscountJSON_LimitsTierCount(t *testing.T) {

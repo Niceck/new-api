@@ -252,6 +252,16 @@ export function RechargeFormCard({
                   usdExchangeRate={usdExchangeRate}
                 />
               ) : null}
+              {!topupInfo?.tier && topupInfo?.tier_unavailable ? (
+                <p
+                  data-testid='topup-tier-unavailable'
+                  className='text-muted-foreground text-xs'
+                >
+                  {t(
+                    'Member level is temporarily unavailable; the amount to pay is still worked out by the server'
+                  )}
+                </p>
+              ) : null}
               {presetAmounts.length > 0 && (
                 <div className='space-y-2.5 sm:space-y-3'>
                   <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>

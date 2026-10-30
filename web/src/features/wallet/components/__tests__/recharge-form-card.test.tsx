@@ -430,5 +430,51 @@ describe('RechargeFormCard member tier', () => {
     const { banner, cards } = await renderWithTier(i18nZh, null)
     assert.equal(banner, null)
     assert.equal(cards[1], '2009.8 折实付 196 • 省 4')
+    assert.equal(
+      document.querySelector('[data-testid="topup-tier-unavailable"]'),
+      null
+    )
+  })
+
+  test('says so when the tier could not be read, instead of looking unconfigured', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18nZh}>
+          <RechargeFormCard
+            topupInfo={{
+              ...topupInfo,
+              amount_options: tiers,
+              discount,
+              tier: null,
+              tier_unavailable: true,
+            }}
+            presetAmounts={tiers.map((value) => ({ value }))}
+            selectedPreset={null}
+            onSelectPreset={() => undefined}
+            topupAmount={100}
+            onTopupAmountChange={() => undefined}
+            paymentAmount={100}
+            calculating={false}
+            onPaymentMethodSelect={() => undefined}
+            paymentLoading={null}
+            redemptionCode=''
+            onRedemptionCodeChange={() => undefined}
+            onRedeem={() => undefined}
+            redeeming={false}
+          />
+        </I18nextProvider>
+      )
+    })
+    const note = container.querySelector(
+      '[data-testid="topup-tier-unavailable"]'
+    )
+    assert.ok(note)
+    assert.match(note.textContent ?? '', /会员等级信息暂时读取不到/)
+    assert.equal(container.querySelector('[data-testid="topup-tier"]'), null)
+    await act(async () => root.unmount())
+    container.remove()
   })
 })

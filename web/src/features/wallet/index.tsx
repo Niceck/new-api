@@ -82,7 +82,12 @@ export function Wallet(props: WalletProps) {
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
-  const { topupInfo, presetAmounts, loading: topupLoading } = useTopupInfo()
+  const {
+    topupInfo,
+    presetAmounts,
+    loading: topupLoading,
+    refetch: refetchTopupInfo,
+  } = useTopupInfo()
 
   // Calculate effective exchange rate - when display type is USD, use rate of 1
   const effectiveUsdExchangeRate = useMemo(() => {
@@ -119,7 +124,13 @@ export function Wallet(props: WalletProps) {
     }
   }, [])
 
-  const tronPayment = useTronPayment({ onSuccess: fetchUser })
+  // A settled top-up changes the balance and may lift the member tier, so
+  // refresh both; otherwise the next quote would show the old tier.
+  const refreshAfterTopUp = useCallback(async () => {
+    await Promise.all([fetchUser(), refetchTopupInfo()])
+  }, [fetchUser, refetchTopupInfo])
+
+  const tronPayment = useTronPayment({ onSuccess: refreshAfterTopUp })
 
   useEffect(() => {
     fetchUser()
@@ -214,7 +225,7 @@ export function Wallet(props: WalletProps) {
 
     if (success) {
       setConfirmDialogOpen(false)
-      await fetchUser()
+      await refreshAfterTopUp()
     }
   }
 
@@ -225,7 +236,7 @@ export function Wallet(props: WalletProps) {
     const success = await redeemCode(redemptionCode)
     if (success) {
       setRedemptionCode('')
-      await fetchUser()
+      await refreshAfterTopUp()
     }
   }
 
@@ -243,7 +254,7 @@ export function Wallet(props: WalletProps) {
     if (success) {
       setCreemDialogOpen(false)
       setSelectedCreemProduct(null)
-      await fetchUser()
+      await refreshAfterTopUp()
     }
   }
 

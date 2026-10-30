@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/shopspring/decimal"
@@ -230,11 +231,13 @@ func TestGetTopUpInfo_ReportsTierAndProgress(t *testing.T) {
 	_, hasNext := tier["next_level"]
 	assert.False(t, hasNext)
 
-	// 读累计失败：钱包页照常打开，只是没有等级
+	// 读累计失败：钱包页照常打开，没有等级，但要标出「暂不可用」而不是看起来像没配置
 	withFaceTotal(t, 0, errors.New("timeout"))
 	recorder = tronHandlerResponse(t, http.MethodGet, "/", "", 382, GetTopUpInfo)
 	require.Equal(t, http.StatusOK, recorder.Code)
-	assert.Nil(t, topUpHandlerBody(t, recorder.Body)["data"].(map[string]any)["tier"])
+	data = topUpHandlerBody(t, recorder.Body)["data"].(map[string]any)
+	assert.Nil(t, data["tier"])
+	assert.Equal(t, true, data["tier_unavailable"])
 }
 
 func TestGetTopUpInfo_TierIsNullWhenNotConfigured(t *testing.T) {
@@ -246,10 +249,49 @@ func TestGetTopUpInfo_TierIsNullWhenNotConfigured(t *testing.T) {
 	_, present := data["tier"]
 	assert.True(t, present, "字段要在，值为 null，前端好区分「没配置」与「老后端」")
 	assert.Nil(t, data["tier"])
+	_, flagged := data["tier_unavailable"]
+	assert.False(t, flagged, "正常时没有这个标记")
 	assert.Zero(t, *calls)
 }
 
 func TestUpdateOption_RejectsBrokenTierDiscount(t *testing.T) {
 	assert.Error(t, operation_setting.ValidateTierDiscountJSON(`{"1000":0.975}`))
 	assert.NoError(t, operation_setting.ValidateTierDiscountJSON(`{"1000":0.98,"2500":0.97,"5000":0.95,"10000":0.92}`))
+}
+
+func TestPayMoneyWithDiscount_RoundsToCents(t *testing.T) {
+	withTopUpPricing(t, testAmountDiscount, testTierDiscount)
+	operation_setting.Price = 1.005 // 别的站点可能这样配：没有这一步会出 0.97485 这种半分钱
+	assert.InDelta(t, 0.97, payMoneyWithDiscount(1, "default", 0.97), 1e-9)
+	assert.InDelta(t, 2.92, payMoneyWithDiscount(3, "default", 0.97), 1e-9)
+	assert.InDelta(t, 100.5, payMoneyWithDiscount(100, "default", 1), 1e-9)
+}
+
+// Stripe / Waffo / Pancake 本站没启用，但前端对所有档位按有效折扣显示角标，所以它们的报价必须同一口径。
+func TestOtherChannelsQuoteTheSameEffectiveDiscount(t *testing.T) {
+	withTopUpPricing(t, testAmountDiscount, testTierDiscount)
+	originalStripe, originalWaffo, originalPancake := setting.StripeUnitPrice, setting.WaffoUnitPrice, setting.WaffoPancakeUnitPrice
+	setting.StripeUnitPrice, setting.WaffoUnitPrice, setting.WaffoPancakeUnitPrice = 1, 1, 1
+	t.Cleanup(func() {
+		setting.StripeUnitPrice, setting.WaffoUnitPrice, setting.WaffoPancakeUnitPrice = originalStripe, originalWaffo, originalPancake
+	})
+	withFaceTotal(t, 2500, nil) // VIP2 9.7 折
+
+	money, err := getStripePayMoney(100, "default", 1)
+	require.NoError(t, err)
+	assert.InDelta(t, 97, money, 1e-9)
+	money, err = getWaffoPayMoney(2000, "default", 1)
+	require.NoError(t, err)
+	assert.InDelta(t, 1840, money, 1e-9, "单笔 9.2 折更优，不叠加")
+	money, err = getWaffoPancakePayMoney(100, "default", 1)
+	require.NoError(t, err)
+	assert.InDelta(t, 97, money, 1e-9)
+
+	withFaceTotal(t, 0, errors.New("timeout"))
+	_, err = getStripePayMoney(100, "default", 1)
+	require.Error(t, err)
+	_, err = getWaffoPayMoney(100, "default", 1)
+	require.Error(t, err)
+	_, err = getWaffoPancakePayMoney(100, "default", 1)
+	require.Error(t, err)
 }

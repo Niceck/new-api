@@ -207,6 +207,8 @@ export interface TopupInfo {
   discount: Record<number, number>
   /** Cumulative top-up tier of the current user; null when tiers are not configured */
   tier?: TopupTierStatus | null
+  /** Tiers are configured but the user's total could not be read right now */
+  tier_unavailable?: boolean
   /** Optional topup link for purchasing codes */
   topup_link?: string
   /** Whether Creem topup is enabled */

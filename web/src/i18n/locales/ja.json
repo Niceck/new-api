@@ -5389,6 +5389,7 @@
     "Top up {{amount}} more to reach VIP{{level}}": "あと {{amount}} チャージで VIP{{level}}",
     "Highest level reached": "最高ランクに到達",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "ランク割引は毎回のチャージに適用されます。単回の割引の方が有利な場合はそちらが適用され、併用はされません",
-    "Progress to VIP{{level}}": "VIP{{level}} までの進捗"
+    "Progress to VIP{{level}}": "VIP{{level}} までの進捗",
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "会員ランク情報を一時的に取得できません。お支払い金額はサーバー側で計算されます"
   }
 }

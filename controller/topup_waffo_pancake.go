@@ -41,7 +41,12 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 		return
 	}
 
-	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	payMoney, err := getWaffoPancakePayMoney(req.Amount, group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Pancake 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -50,7 +55,8 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": fmt.Sprintf("%.2f", payMoney)})
 }
 
-func getWaffoPancakePayMoney(amount int64, group string) float64 {
+// 折扣与易支付同一口径（单笔档位与累计充值等级取优，见 topUpDiscountFor）；读累计失败时返回错误。
+func getWaffoPancakePayMoney(amount int64, group string, userId int) (float64, error) {
 	dAmount := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dAmount = dAmount.Div(decimal.NewFromFloat(common.QuotaPerUnit))
@@ -61,9 +67,9 @@ func getWaffoPancakePayMoney(amount int64, group string) float64 {
 		topupGroupRatio = 1
 	}
 
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok && ds > 0 {
-		discount = ds
+	discount, _, _, err := topUpDiscountFor(amount, userId)
+	if err != nil {
+		return 0, err
 	}
 
 	payMoney := dAmount.
@@ -71,7 +77,7 @@ func getWaffoPancakePayMoney(amount int64, group string) float64 {
 		Mul(decimal.NewFromFloat(topupGroupRatio)).
 		Mul(decimal.NewFromFloat(discount))
 
-	return payMoney.InexactFloat64()
+	return payMoney.InexactFloat64(), nil
 }
 
 func normalizeWaffoPancakeTopUpAmount(amount int64) int64 {
@@ -365,7 +371,12 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		return
 	}
 
-	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	payMoney, err := getWaffoPancakePayMoney(req.Amount, group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Pancake 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return

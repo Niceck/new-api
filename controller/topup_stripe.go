@@ -53,7 +53,12 @@ func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	payMoney := getStripePayMoney(float64(req.Amount), group)
+	payMoney, err := getStripePayMoney(float64(req.Amount), group, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -394,7 +399,9 @@ func GetChargedAmount(count float64, user model.User) float64 {
 	return count * topUpGroupRatio
 }
 
-func getStripePayMoney(amount float64, group string) float64 {
+// getStripePayMoney 的折扣与易支付同一口径（单笔档位与累计充值等级取优，见 topUpDiscountFor），
+// 前端按有效折扣显示的角标才与 Stripe 实际收款一致；读累计失败时返回错误，调用方拒绝下单。
+func getStripePayMoney(amount float64, group string, userId int) (float64, error) {
 	originalAmount := amount
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		amount = amount / common.QuotaPerUnit
@@ -404,15 +411,12 @@ func getStripePayMoney(amount float64, group string) float64 {
 	if topupGroupRatio == 0 {
 		topupGroupRatio = 1
 	}
-	// apply optional preset discount by the original request amount (if configured), default 1.0
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(originalAmount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
+	discount, _, _, err := topUpDiscountFor(int64(originalAmount), userId)
+	if err != nil {
+		return 0, err
 	}
 	payMoney := amount * setting.StripeUnitPrice * topupGroupRatio * discount
-	return payMoney
+	return payMoney, nil
 }
 
 func getStripeMinTopup() int64 {

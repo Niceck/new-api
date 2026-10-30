@@ -220,6 +220,10 @@ func validateOptionValue(key string, value string) error {
 	if key == apiBaseURLOptionKey {
 		return operation_setting.ValidateApiBaseURL(value)
 	}
+	if key == operation_setting.TierDiscountOptionKey {
+		// 累计充值等级直接决定应付金额，配置框架对解析失败又是静默跳过：所有写入路径都要在这里拦住
+		return operation_setting.ValidateTierDiscountJSON(value)
+	}
 	return nil
 }
 
