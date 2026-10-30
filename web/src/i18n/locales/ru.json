@@ -5380,6 +5380,15 @@
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Поступило меньше суммы к оплате: зачислено пропорционально, заказ закрыт",
     "Paid more than the amount due, so the face value of the order was credited": "Поступило больше суммы к оплате: зачислен номинал заказа",
     "Credited {{credited}} for {{received}} USDT received": "Зачислено {{credited}} за поступившие {{received}} USDT",
-    "Tokens in the {{group}} group must use {{url}} as the base URL": "Токены группы {{group}} должны использовать {{url}} в качестве базового URL"
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Токены группы {{group}} должны использовать {{url}} в качестве базового URL",
+    "Member level": "Уровень участника",
+    "Every top-up at {{percent}}% off": "Каждое пополнение со скидкой {{percent}}%",
+    "Top up {{amount}} in total to unlock a permanent discount": "Пополните на {{amount}} в сумме, чтобы открыть постоянную скидку",
+    "Total topped up {{amount}}": "Всего пополнено {{amount}}",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)": "Ещё {{amount}} до VIP{{level}} (скидка {{percent}}%)",
+    "Top up {{amount}} more to reach VIP{{level}}": "Ещё {{amount}} до VIP{{level}}",
+    "Highest level reached": "Достигнут высший уровень",
+    "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Скидка уровня действует на каждое пополнение; если скидка за сумму выгоднее, применяется она, без суммирования",
+    "Progress to VIP{{level}}": "Прогресс до VIP{{level}}"
   }
 }

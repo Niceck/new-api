@@ -44,6 +44,7 @@ import {
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
+  effectiveDiscount,
 } from '../lib'
 import type {
   PaymentMethod,
@@ -53,6 +54,7 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import { TopupTierBanner } from './topup-tier-banner'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -244,6 +246,12 @@ export function RechargeFormCard({
         <div className='space-y-4 sm:space-y-6'>
           {hasConfigurableTopup && (
             <>
+              {topupInfo?.tier ? (
+                <TopupTierBanner
+                  tier={topupInfo.tier}
+                  usdExchangeRate={usdExchangeRate}
+                />
+              ) : null}
               {presetAmounts.length > 0 && (
                 <div className='space-y-2.5 sm:space-y-3'>
                   <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
@@ -251,10 +259,12 @@ export function RechargeFormCard({
                   </Label>
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 md:grid-cols-4'>
                     {presetAmounts.map((preset) => {
-                      const discount =
-                        preset.discount ||
-                        topupInfo?.discount?.[preset.value] ||
-                        1.0
+                      // The badge shows what this preset really pays: its own
+                      // discount or the member tier's, whichever is better.
+                      const discount = effectiveDiscount(
+                        preset.discount || topupInfo?.discount?.[preset.value],
+                        topupInfo?.tier
+                      )
                       const {
                         displayValue,
                         actualPrice,

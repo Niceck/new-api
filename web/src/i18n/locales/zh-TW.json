@@ -5379,6 +5379,15 @@
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "到帳少於應付金額，已按比例入帳，本單已結清",
     "Paid more than the amount due, so the face value of the order was credited": "到帳多於應付金額，已按訂單面值入帳",
     "Credited {{credited}} for {{received}} USDT received": "實到 {{received}} USDT，實際入帳 {{credited}}",
-    "Tokens in the {{group}} group must use {{url}} as the base URL": "{{group}} 分組的令牌請把介面位址（Base URL）改為 {{url}}"
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "{{group}} 分組的令牌請把介面位址（Base URL）改為 {{url}}",
+    "Member level": "會員等級",
+    "Every top-up at {{percent}}% off": "每筆儲值 {{fold}} 折",
+    "Top up {{amount}} in total to unlock a permanent discount": "累計儲值滿 {{amount}} 起享永久折扣",
+    "Total topped up {{amount}}": "累計儲值 {{amount}}",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)": "再儲值 {{amount}} 升級 VIP{{level}}（{{fold}} 折）",
+    "Top up {{amount}} more to reach VIP{{level}}": "再儲值 {{amount}} 升級 VIP{{level}}",
+    "Highest level reached": "已是最高等級",
+    "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "等級折扣適用於每一筆儲值；單筆檔位優惠更划算時按單筆計算，兩者不疊加",
+    "Progress to VIP{{level}}": "距離 VIP{{level}} 的進度"
   }
 }

@@ -21,7 +21,7 @@ import { after, describe, test } from 'node:test'
 
 import { Window } from 'happy-dom'
 
-import type { PaymentMethod, TopupInfo } from '../../types'
+import type { PaymentMethod, TopupInfo, TopupTierStatus } from '../../types'
 
 const domWindow = new Window()
 for (const key of [
@@ -302,5 +302,133 @@ describe('RechargeFormCard preset discount wording', () => {
       const [first] = await presetCardTexts(instance)
       assert.doesNotMatch(first ?? '', /OFF|折|Save|省/)
     }
+  })
+})
+
+describe('RechargeFormCard member tier', () => {
+  const tiers = [100, 200, 500, 1000, 2000]
+  const discount = { 200: 0.98, 500: 0.97, 1000: 0.95, 2000: 0.92 }
+  const ladder = [
+    { level: 1, threshold: 1000, discount: 0.98 },
+    { level: 2, threshold: 2500, discount: 0.97 },
+    { level: 3, threshold: 5000, discount: 0.95 },
+    { level: 4, threshold: 10000, discount: 0.92 },
+  ]
+  const vip2: TopupTierStatus = {
+    total: 2735,
+    level: 2,
+    discount: 0.97,
+    threshold: 2500,
+    next_level: 3,
+    next_threshold: 5000,
+    next_discount: 0.95,
+    remaining: 2265,
+    tiers: ladder,
+  }
+
+  async function renderWithTier(
+    instance: typeof i18n,
+    tier: TopupTierStatus | null
+  ): Promise<{ banner: string | null; cards: string[] }> {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={instance}>
+          <RechargeFormCard
+            topupInfo={{ ...topupInfo, amount_options: tiers, discount, tier }}
+            presetAmounts={tiers.map((value) => ({ value }))}
+            selectedPreset={null}
+            onSelectPreset={() => undefined}
+            topupAmount={100}
+            onTopupAmountChange={() => undefined}
+            paymentAmount={97}
+            calculating={false}
+            onPaymentMethodSelect={() => undefined}
+            paymentLoading={null}
+            redemptionCode=''
+            onRedemptionCodeChange={() => undefined}
+            onRedeem={() => undefined}
+            redeeming={false}
+          />
+        </I18nextProvider>
+      )
+    })
+    const bannerNode = container.querySelector('[data-testid="topup-tier"]')
+    const banner = bannerNode
+      ? (bannerNode.textContent ?? '').replaceAll(/\s+/g, ' ').trim()
+      : null
+    const cards = [...container.querySelectorAll('button')]
+      .filter((button) => button.className.includes('min-h-16'))
+      .map((button) =>
+        (button.textContent ?? '').replaceAll(/\s+/g, ' ').trim()
+      )
+    await act(async () => root.unmount())
+    container.remove()
+    return { banner, cards }
+  }
+
+  test('Chinese banner: level, rate, total and the road to the next level', async () => {
+    const { banner } = await renderWithTier(i18nZh, vip2)
+    assert.ok(banner)
+    assert.match(banner, /VIP2/)
+    assert.match(banner, /每笔充值 9\.7 折/)
+    assert.match(banner, /累计充值 2,735/)
+    assert.match(banner, /再充 2,265 升级 VIP3（9\.5 折）/)
+    assert.match(banner, /不叠加/)
+    assert.doesNotMatch(banner, /OFF|Pay|Save|Top up|Member level/)
+  })
+
+  test('preset badges show the better of the single-order and tier rates', async () => {
+    const { cards } = await renderWithTier(i18nZh, vip2)
+    assert.equal(cards.length, 5)
+    assert.equal(cards[0], '1009.7 折实付 97 • 省 3') // no single-order discount: tier applies
+    assert.equal(cards[1], '2009.7 折实付 194 • 省 6') // 9.8 → tier 9.7 is better
+    assert.equal(cards[2], '5009.7 折实付 485 • 省 15') // equal: unchanged, not 0.97²
+    assert.match(cards[3] ?? '', /9\.5 折实付 950 • 省 50$/) // single-order better
+    assert.match(cards[4] ?? '', /9\.2 折实付 1,840 • 省 160$/)
+  })
+
+  test('below the first level the banner invites and the badges are unchanged', async () => {
+    const { banner, cards } = await renderWithTier(i18nZh, {
+      total: 300,
+      level: 0,
+      discount: 1,
+      next_level: 1,
+      next_threshold: 1000,
+      next_discount: 0.98,
+      remaining: 700,
+      tiers: ladder,
+    })
+    assert.ok(banner)
+    assert.match(banner, /VIP0/)
+    assert.match(banner, /累计充值满 1,000 起享永久折扣/)
+    assert.match(banner, /累计充值 300/)
+    assert.match(banner, /再充 700 升级 VIP1（9\.8 折）/)
+    assert.equal(cards[0], '100实付 100')
+    assert.equal(cards[1], '2009.8 折实付 196 • 省 4')
+  })
+
+  test('the top level says so, in English too', async () => {
+    const { banner } = await renderWithTier(i18n, {
+      total: 10190,
+      level: 4,
+      discount: 0.92,
+      threshold: 10000,
+      tiers: ladder,
+    })
+    assert.ok(banner)
+    assert.match(banner, /VIP4/)
+    assert.match(banner, /Every top-up at 8% off/)
+    assert.match(banner, /Total topped up 10,190/)
+    assert.match(banner, /Highest level reached/)
+    assert.doesNotMatch(banner, /more to reach/)
+  })
+
+  test('no banner when tiers are not configured', async () => {
+    const { banner, cards } = await renderWithTier(i18nZh, null)
+    assert.equal(banner, null)
+    assert.equal(cards[1], '2009.8 折实付 196 • 省 4')
   })
 })

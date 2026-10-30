@@ -5379,6 +5379,15 @@
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "到账少于应付金额，已按比例入账，本单已结清",
     "Paid more than the amount due, so the face value of the order was credited": "到账多于应付金额，已按订单面值入账",
     "Credited {{credited}} for {{received}} USDT received": "实到 {{received}} USDT，实际入账 {{credited}}",
-    "Tokens in the {{group}} group must use {{url}} as the base URL": "{{group}} 分组的令牌请把接口地址（Base URL）改为 {{url}}"
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "{{group}} 分组的令牌请把接口地址（Base URL）改为 {{url}}",
+    "Member level": "会员等级",
+    "Every top-up at {{percent}}% off": "每笔充值 {{fold}} 折",
+    "Top up {{amount}} in total to unlock a permanent discount": "累计充值满 {{amount}} 起享永久折扣",
+    "Total topped up {{amount}}": "累计充值 {{amount}}",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)": "再充 {{amount}} 升级 VIP{{level}}（{{fold}} 折）",
+    "Top up {{amount}} more to reach VIP{{level}}": "再充 {{amount}} 升级 VIP{{level}}",
+    "Highest level reached": "已是最高等级",
+    "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "等级折扣适用于每一笔充值；单笔档位优惠更划算时按单笔算，两者不叠加",
+    "Progress to VIP{{level}}": "距离 VIP{{level}} 的进度"
   }
 }

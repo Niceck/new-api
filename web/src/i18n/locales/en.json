@@ -5379,6 +5379,15 @@
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Paid less than the amount due, so it was credited in proportion and this order is settled",
     "Paid more than the amount due, so the face value of the order was credited": "Paid more than the amount due, so the face value of the order was credited",
     "Credited {{credited}} for {{received}} USDT received": "Credited {{credited}} for {{received}} USDT received",
-    "Tokens in the {{group}} group must use {{url}} as the base URL": "Tokens in the {{group}} group must use {{url}} as the base URL"
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Tokens in the {{group}} group must use {{url}} as the base URL",
+    "Member level": "Member level",
+    "Every top-up at {{percent}}% off": "Every top-up at {{percent}}% off",
+    "Top up {{amount}} in total to unlock a permanent discount": "Top up {{amount}} in total to unlock a permanent discount",
+    "Total topped up {{amount}}": "Total topped up {{amount}}",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)": "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)",
+    "Top up {{amount}} more to reach VIP{{level}}": "Top up {{amount}} more to reach VIP{{level}}",
+    "Highest level reached": "Highest level reached",
+    "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead",
+    "Progress to VIP{{level}}": "Progress to VIP{{level}}"
   }
 }

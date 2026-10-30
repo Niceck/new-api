@@ -5380,6 +5380,15 @@
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Montant reçu inférieur au montant dû : crédité au prorata, cette commande est soldée",
     "Paid more than the amount due, so the face value of the order was credited": "Montant reçu supérieur au montant dû : la valeur nominale de la commande a été créditée",
     "Credited {{credited}} for {{received}} USDT received": "{{credited}} crédité pour {{received}} USDT reçus",
-    "Tokens in the {{group}} group must use {{url}} as the base URL": "Les jetons du groupe {{group}} doivent utiliser {{url}} comme URL de base"
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Les jetons du groupe {{group}} doivent utiliser {{url}} comme URL de base",
+    "Member level": "Niveau membre",
+    "Every top-up at {{percent}}% off": "Chaque recharge à -{{percent}} %",
+    "Top up {{amount}} in total to unlock a permanent discount": "Rechargez {{amount}} au total pour débloquer une remise permanente",
+    "Total topped up {{amount}}": "Total rechargé {{amount}}",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)": "Encore {{amount}} pour atteindre VIP{{level}} (-{{percent}} %)",
+    "Top up {{amount}} more to reach VIP{{level}}": "Encore {{amount}} pour atteindre VIP{{level}}",
+    "Highest level reached": "Niveau maximal atteint",
+    "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "La remise de niveau s'applique à chaque recharge ; si une remise par montant est plus avantageuse, c'est elle qui s'applique, sans cumul",
+    "Progress to VIP{{level}}": "Progression vers VIP{{level}}"
   }
 }

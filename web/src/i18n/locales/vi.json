@@ -5380,6 +5380,15 @@
     "Paid less than the amount due, so it was credited in proportion and this order is settled": "Số tiền nhận được ít hơn số cần thanh toán nên đã ghi có theo tỷ lệ và đơn này đã tất toán",
     "Paid more than the amount due, so the face value of the order was credited": "Số tiền nhận được nhiều hơn số cần thanh toán nên đã ghi có theo mệnh giá của đơn",
     "Credited {{credited}} for {{received}} USDT received": "Đã ghi có {{credited}} cho {{received}} USDT nhận được",
-    "Tokens in the {{group}} group must use {{url}} as the base URL": "Token thuộc nhóm {{group}} phải dùng {{url}} làm Base URL"
+    "Tokens in the {{group}} group must use {{url}} as the base URL": "Token thuộc nhóm {{group}} phải dùng {{url}} làm Base URL",
+    "Member level": "Hạng thành viên",
+    "Every top-up at {{percent}}% off": "Mỗi lần nạp giảm {{percent}}%",
+    "Top up {{amount}} in total to unlock a permanent discount": "Nạp tổng cộng {{amount}} để mở khóa ưu đãi vĩnh viễn",
+    "Total topped up {{amount}}": "Đã nạp tổng cộng {{amount}}",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)": "Nạp thêm {{amount}} để lên VIP{{level}} (giảm {{percent}}%)",
+    "Top up {{amount}} more to reach VIP{{level}}": "Nạp thêm {{amount}} để lên VIP{{level}}",
+    "Highest level reached": "Đã đạt hạng cao nhất",
+    "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Ưu đãi theo hạng áp dụng cho mọi lần nạp; nếu ưu đãi theo mức nạp tốt hơn thì áp dụng mức đó, không cộng dồn",
+    "Progress to VIP{{level}}": "Tiến độ lên VIP{{level}}"
   }
 }

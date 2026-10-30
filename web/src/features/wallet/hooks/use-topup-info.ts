@@ -23,6 +23,7 @@ import {
   generatePresetAmounts,
   mergePresetAmounts,
   getMinTopupAmount,
+  parseTopupTier,
 } from '../lib'
 import type {
   TopupInfo,
@@ -188,6 +189,7 @@ export function useTopupInfo() {
         ),
         amount_options: parseAmountOptions(response.data.amount_options),
         discount: parseDiscountMap(response.data.discount),
+        tier: parseTopupTier(response.data.tier),
         creem_products: parseCreemProducts(response.data.creem_products),
         waffo_pay_methods: parseWaffoPayMethods(
           response.data.waffo_pay_methods

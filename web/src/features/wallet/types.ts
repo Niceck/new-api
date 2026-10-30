@@ -155,6 +155,39 @@ export interface WaffoPayMethod {
 }
 
 /**
+ * One cumulative top-up tier (the server sends them sorted by threshold)
+ */
+export interface TopupTierLevel {
+  /** Level number, from 1 */
+  level: number
+  /** Cumulative face value needed, in top-up units */
+  threshold: number
+  /** Rate paid on every top-up once reached (0.92 = 8% off) */
+  discount: number
+}
+
+/**
+ * The current user's cumulative top-up tier
+ */
+export interface TopupTierStatus {
+  /** Cumulative face value of successful top-ups */
+  total: number
+  /** Current level, 0 below the first threshold */
+  level: number
+  /** Rate paid at the current level, 1 below the first threshold */
+  discount: number
+  /** Threshold of the current level */
+  threshold?: number
+  next_level?: number
+  next_threshold?: number
+  next_discount?: number
+  /** Face value still needed to reach the next level */
+  remaining?: number
+  /** The whole ladder */
+  tiers: TopupTierLevel[]
+}
+
+/**
  * Topup configuration information
  */
 export interface TopupInfo {
@@ -172,6 +205,8 @@ export interface TopupInfo {
   amount_options: number[]
   /** Discount rates by amount */
   discount: Record<number, number>
+  /** Cumulative top-up tier of the current user; null when tiers are not configured */
+  tier?: TopupTierStatus | null
   /** Optional topup link for purchasing codes */
   topup_link?: string
   /** Whether Creem topup is enabled */
