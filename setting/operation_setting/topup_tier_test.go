@@ -34,6 +34,8 @@ func TestValidateTierDiscountJSON_RejectsBadShapes(t *testing.T) {
 		"带正号的门槛":         `{"+1000":0.98}`,
 		"浮点尾数":           `{"1000":0.9700000000000001}`,
 		"门槛超过上限":         `{"10000000000":0.98}`,
+		"null 不是空表":      `null`,
+		"相邻等级折扣相同":       `{"1000":0.98,"2500":0.98}`,
 	}
 	for name, value := range cases {
 		err := ValidateTierDiscountJSON(value)

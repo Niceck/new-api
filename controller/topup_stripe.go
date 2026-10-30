@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,6 +42,9 @@ type StripePayRequest struct {
 
 type StripeAdaptor struct {
 }
+
+// stripeNoDiscountMessage Stripe 收款套不上折扣时给客户的话。
+const stripeNoDiscountMessage = "Stripe 渠道暂不支持充值折扣，请改用其他支付方式"
 
 func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
 	if req.Amount < getStripeMinTopup() {
@@ -91,6 +95,18 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	}
 
 	id := c.GetInt("id")
+	// Stripe Checkout 按价格 ID × 数量收款，套不上单笔档位或累计等级的折扣。试算与钱包页角标显示的是有效折扣，
+	// 真收全价就是对客不实：有折扣就明确拒绝，请客户换渠道；读累计失败同样拒绝。
+	discount, _, _, err := topUpDiscountFor(req.Amount, id)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 读取充值等级失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return
+	}
+	if discount < 1 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": stripeNoDiscountMessage})
+		return
+	}
 	user, _ := model.GetUserById(id, false)
 	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
 
@@ -416,7 +432,7 @@ func getStripePayMoney(amount float64, group string, userId int) (float64, error
 		return 0, err
 	}
 	payMoney := amount * setting.StripeUnitPrice * topupGroupRatio * discount
-	return payMoney, nil
+	return math.Round(payMoney*100) / 100, nil
 }
 
 func getStripeMinTopup() int64 {

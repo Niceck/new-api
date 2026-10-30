@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -224,8 +225,15 @@ func validateOptionValue(key string, value string) error {
 		// 累计充值等级直接决定应付金额，配置框架对解析失败又是静默跳过：所有写入路径都要在这里拦住
 		return operation_setting.ValidateTierDiscountJSON(value)
 	}
+	if key == quotaDisplayTypeOptionKey && value == operation_setting.QuotaDisplayTypeTokens &&
+		len(operation_setting.TopUpTiers()) > 0 {
+		// 反向也要拦：先按货币配好等级、再切到 tokens 展示，各支付渠道订单面值的单位就不一致了
+		return errors.New("已配置累计充值等级，不能切换为按 tokens 展示；请先把 " + operation_setting.TierDiscountOptionKey + " 清成 {}")
+	}
 	return nil
 }
+
+const quotaDisplayTypeOptionKey = "general_setting.quota_display_type"
 
 const (
 	groupEntryHostsOptionKey         = "general_setting.group_entry_hosts"
@@ -661,6 +669,13 @@ func handleConfigUpdate(key, value string) bool {
 		if _, err := operation_setting.ParseGroupEntryHosts(value); err != nil {
 			// 管理接口写入前已校验过；走到这里说明值是绕过校验进库的（直接改库）
 			common.SysError("库里的 " + key + " 不合规，入口限制可能没有按预期生效：" + err.Error())
+		}
+	}
+	if key == operation_setting.TierDiscountOptionKey {
+		if err := operation_setting.ValidateTierDiscountJSON(value); err != nil {
+			// 同上：绕过校验进库的值。配置框架对解析失败静默跳过（进程里还是旧表），语义非法的会进表、
+			// 再由 TopUpTiers 按没有等级处理；两种情形这里都先记一笔，别静默成「没配置等级」
+			common.SysError("库里的 " + key + " 不合规，累计充值等级可能没有按预期生效：" + err.Error())
 		}
 	}
 

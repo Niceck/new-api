@@ -69,8 +69,9 @@ func tiersFromMap(raw map[int]float64) ([]TopUpTier, error) {
 	sort.Slice(tiers, func(i, j int) bool { return tiers[i].Threshold < tiers[j].Threshold })
 	for i := range tiers {
 		tiers[i].Level = i + 1
-		if i > 0 && tiers[i].Discount > tiers[i-1].Discount {
-			return nil, fmt.Errorf("%w：门槛 %d 的折扣 %v 比门槛 %d 的 %v 更差，越高档应越优惠",
+		if i > 0 && tiers[i].Discount >= tiers[i-1].Discount {
+			// 相同也不算台阶：客户看不出升级有什么用；运维脚本的期望卡同样拒绝
+			return nil, fmt.Errorf("%w：门槛 %d 的折扣 %v 不比门槛 %d 的 %v 更优惠，越高档应越优惠",
 				ErrTierDiscountInvalid, tiers[i].Threshold, tiers[i].Discount, tiers[i-1].Threshold, tiers[i-1].Discount)
 		}
 	}
@@ -95,6 +96,10 @@ func ValidateTierDiscountJSON(value string) error {
 	var raw map[string]json.Number
 	if err := common.UnmarshalJsonStr(trimmed, &raw); err != nil {
 		return fmt.Errorf("%w：应为 {\"累计门槛\": 折扣} 的 JSON 对象（%v）", ErrTierDiscountInvalid, err)
+	}
+	if raw == nil {
+		// json 把 null 解成 nil map，不报错；它不是「空表」，要关闭等级请明确写 {}
+		return fmt.Errorf("%w：不能是 null，要关闭等级请写 {}", ErrTierDiscountInvalid)
 	}
 	if keys := tierKeyPattern.FindAllStringIndex(trimmed, -1); len(keys) != len(raw) {
 		return fmt.Errorf("%w：有重复的门槛键", ErrTierDiscountInvalid)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -100,7 +101,7 @@ func getWaffoPayMoney(amount float64, group string, userId int) (float64, error)
 	if err != nil {
 		return 0, err
 	}
-	return amount * setting.WaffoUnitPrice * topupGroupRatio * discount, nil
+	return math.Round(amount*setting.WaffoUnitPrice*topupGroupRatio*discount*100) / 100, nil
 }
 
 type WaffoPayRequest struct {

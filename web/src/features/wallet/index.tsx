@@ -200,9 +200,13 @@ export function Wallet(props: WalletProps) {
         return
       }
 
-      // Calculate payment amount and show confirmation dialog
-      await calculatePaymentAmount(topupAmount, method.type)
-      setConfirmDialogOpen(true)
+      // Calculate payment amount and show confirmation dialog. A failed
+      // quote comes back as 0 (e.g. the member tier could not be read):
+      // never open a 0-amount confirmation for it.
+      const quoted = await calculatePaymentAmount(topupAmount, method.type)
+      if (quoted > 0) {
+        setConfirmDialogOpen(true)
+      }
     } finally {
       setPaymentLoading(null)
     }

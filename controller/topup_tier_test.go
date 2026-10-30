@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
+	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -294,4 +295,26 @@ func TestOtherChannelsQuoteTheSameEffectiveDiscount(t *testing.T) {
 	require.Error(t, err)
 	_, err = getWaffoPancakePayMoney(100, "default", 1)
 	require.Error(t, err)
+}
+
+// Stripe Checkout 按价格 ID × 数量收款，套不上折扣：有折扣（单笔或等级）就拒绝建单，读累计失败也拒绝。
+func TestStripeRequestPay_RefusesWhenADiscountWouldApply(t *testing.T) {
+	withTopUpPricing(t, testAmountDiscount, testTierDiscount)
+	originalMin := setting.StripeMinTopUp
+	setting.StripeMinTopUp = 1
+	t.Cleanup(func() { setting.StripeMinTopUp = originalMin })
+	pay := func(amount int64) string {
+		return tronHandlerResponse(t, http.MethodPost, "/", "{}", 5, func(c *gin.Context) {
+			(&StripeAdaptor{}).RequestPay(c, &StripePayRequest{Amount: amount, PaymentMethod: model.PaymentMethodStripe})
+		}).Body.String()
+	}
+
+	withFaceTotal(t, 0, nil)
+	assert.Contains(t, pay(200), stripeNoDiscountMessage, "单笔档位 9.8 折：Stripe 收不了折扣价")
+
+	withFaceTotal(t, 2500, nil)
+	assert.Contains(t, pay(50), stripeNoDiscountMessage, "VIP2 9.7 折")
+
+	withFaceTotal(t, 0, errors.New("timeout"))
+	assert.Contains(t, pay(50), topUpTierUnavailableMessage)
 }
