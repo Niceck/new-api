@@ -94,6 +94,45 @@ export function latestOnly(): () => () => boolean {
   }
 }
 
+/**
+ * Runs one quote under a ticket: only the newest publishes. An outdated answer
+ * reports 0, exactly like a failed quote, so no caller opens a dialog on it.
+ */
+export async function runQuote(
+  isLatest: () => boolean,
+  request: () => Promise<PaymentQuote>,
+  publish: (quote: PaymentQuote) => void
+): Promise<number> {
+  try {
+    const calculated = await request()
+    if (!isLatest()) {
+      return 0
+    }
+    publish(calculated)
+    return calculated.money
+  } catch {
+    if (isLatest()) {
+      publish(emptyPaymentQuote)
+    }
+    return 0
+  }
+}
+
+/**
+ * What the customer confirmed, if it can still be confirmed: a real quote for
+ * this very amount. Without one there is nothing to hold the order to, so the
+ * order must not be placed (never fall back to sending no expectation).
+ */
+export function confirmableQuote(
+  quote: Pick<PaymentQuote, 'moneyText' | 'money' | 'bonusQuota' | 'quotedFor'>,
+  topupAmount: number
+): { money: string; bonusQuota: number } | null {
+  if (quote.quotedFor !== topupAmount || !quote.moneyText || quote.money <= 0) {
+    return null
+  }
+  return { money: quote.moneyText, bonusQuota: quote.bonusQuota }
+}
+
 /** A failed order answers {message:'error', data:'<the reason>'}: show the reason. */
 export function paymentErrorMessage(response: {
   message?: string
@@ -154,18 +193,13 @@ export function usePayment() {
   const calculatePaymentAmount = useCallback(
     async (topupAmount: number, paymentType: string) => {
       const isLatest = nextQuoteTicket()
+      setCalculating(true)
       try {
-        setCalculating(true)
-        const calculated = await requestPaymentQuote(topupAmount, paymentType)
-        if (isLatest()) {
-          setQuote(calculated)
-        }
-        return calculated.money
-      } catch {
-        if (isLatest()) {
-          setQuote(emptyPaymentQuote)
-        }
-        return 0
+        return await runQuote(
+          isLatest,
+          () => requestPaymentQuote(topupAmount, paymentType),
+          setQuote
+        )
       } finally {
         if (isLatest()) {
           setCalculating(false)

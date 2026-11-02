@@ -353,9 +353,24 @@ func TestGetTopUpInfo_DiscountModeIsUnchanged(t *testing.T) {
 }
 
 func TestUpdateOption_RejectsBrokenBonusTable(t *testing.T) {
+	db := setupEpayCallbackTest(t)
+	require.NoError(t, db.AutoMigrate(&model.Option{}))
 	withQuotaPerUnit(t, 500_000)
-	assert.Error(t, model.UpdateOption(operation_setting.AmountBonusOptionKey, `{"200":0.98}`), "把折扣写进赠送表")
-	assert.Error(t, model.UpdateOption(operation_setting.TierBonusOptionKey, `{"1000":0.05,"2500":0.03}`), "高档少送")
+	// 要认错误类型：写库失败也会报错，只看「有错误」分不清是校验拦下的还是库不行
+	assert.ErrorIs(t, model.UpdateOption(operation_setting.AmountBonusOptionKey, `{"200":0.98}`), operation_setting.ErrTopUpBonusInvalid, "把折扣写进赠送表")
+	assert.ErrorIs(t, model.UpdateOption(operation_setting.TierBonusOptionKey, `{"1000":0.05,"2500":0.03}`), operation_setting.ErrTopUpBonusInvalid, "高档少送")
+}
+
+func TestTopUpDiscountFor_OtherGatewaysGetNoDiscountInBonusMode(t *testing.T) {
+	// Stripe、Waffo、Pancake 从这里取折扣：赠送模式下折扣表还留在库里，但不能再生效
+	withTopUpBonus(t, testAmountBonus, testTierBonus)
+	withTopUpPricing(t, testAmountDiscount, testTierDiscount)
+	calls := withFaceTotal(t, 10000, nil)
+	discount, tier, _, err := topUpDiscountFor(2000, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 1.0, discount)
+	assert.Nil(t, tier)
+	assert.Zero(t, *calls)
 }
 
 func bonusGatewayContext() (*gin.Context, *httptest.ResponseRecorder) {

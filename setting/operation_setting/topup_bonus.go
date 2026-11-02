@@ -22,8 +22,9 @@ import (
 //   - 两者取高、不叠加。赠送额在建单时算好落进 top_ups.bonus_quota，入账只认这个快照，之后改配置不影响在途订单。
 //
 // amount_bonus 非空就是「赠送模式」：折扣表不再生效，实付恒等于面值，所以不会出现既打折又赠送的订单。
-// 它是唯一的开关：等级表只在开关打开时才生效。切换时先写好等级表、再写单笔表，写单笔表的那一下整体切换，
-// 任何时刻一笔订单要么全按折扣、要么全按赠送。写 {} 即关闭，关闭后折扣表（amount_discount / tier_discount）恢复生效。
+// 它是唯一的开关：等级表只在开关打开时才生效。切换只写这一个键，折扣表（amount_discount / tier_discount）与等级
+// 赠送表一直留在库里，所以任何时刻一笔订单要么全按折扣、要么全按赠送，配置定时重载的旧结果也只会回到上一个完整的模式。
+// 写 {} 即关闭，折扣表立刻恢复生效；回滚到不认这些键的旧镜像时同样。
 
 const (
 	// AmountBonusOptionKey / TierBonusOptionKey 配置键；写入前必须过 ValidateTopUpBonusJSON（模型层与管理接口都挂了）。
@@ -195,7 +196,7 @@ type TopUpBonusOffer struct {
 	Tiers []TopUpTier // 累计等级
 }
 
-// CurrentTopUpBonusOffer 取一份快照。先读开关（单笔表）再读等级表：切换时等级表先写好、开关后开，所以开关开着时等级表一定在。
+// CurrentTopUpBonusOffer 取一份快照。等级表切换时不动，开关开着时它一定在。
 func CurrentTopUpBonusOffer() TopUpBonusOffer {
 	if GetQuotaDisplayType() == QuotaDisplayTypeTokens {
 		return TopUpBonusOffer{}

@@ -34,6 +34,7 @@ import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE, PAYMENT_TYPES } from './constants'
 import {
   useTopupInfo,
+  confirmableQuote,
   usePayment,
   useRedemption,
   useCreemPayment,
@@ -235,15 +236,20 @@ export function Wallet(props: WalletProps) {
       selectedWaffoMethodIndex,
       {
         // The order must match what the dialog showed; the server refuses
-        // otherwise and the new quote is shown below.
-        regular: (amount, type) =>
-          processPayment(
-            amount,
-            type,
-            quoteIsCurrent && paymentMoneyText
-              ? { money: paymentMoneyText, bonusQuota: paymentBonusQuota }
-              : undefined
-          ),
+        // otherwise and the new quote is shown below. Without a valid quote
+        // there is nothing to hold it to, so nothing is placed.
+        regular: async (amount, type) => {
+          const confirmed = confirmableQuote(
+            {
+              money: paymentAmount,
+              moneyText: paymentMoneyText,
+              bonusQuota: paymentBonusQuota,
+              quotedFor,
+            },
+            amount
+          )
+          return confirmed ? processPayment(amount, type, confirmed) : false
+        },
         waffo: processWaffoPayment,
         waffoPancake: processWaffoPancakePayment,
       }

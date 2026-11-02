@@ -22,10 +22,13 @@ import { describe, test } from 'node:test'
 import { PAYMENT_TYPES } from '../constants'
 import type { AmountResponse } from '../types'
 import {
+  confirmableQuote,
   latestOnly,
   paymentErrorMessage,
+  runQuote,
   requestPaymentAmount,
   requestPaymentQuote,
+  type PaymentQuote,
 } from './use-payment'
 
 describe('payment amount routing', () => {
@@ -147,5 +150,86 @@ describe('paymentErrorMessage', () => {
     assert.equal(paymentErrorMessage({ message: '无权限' }), '无权限')
     assert.equal(paymentErrorMessage({ message: 'error', data: {} }), 'error')
     assert.equal(paymentErrorMessage({}), undefined)
+  })
+})
+
+describe('runQuote', () => {
+  const quoteOf = (money: number, quotedFor: number): PaymentQuote => ({
+    money,
+    moneyText: money.toFixed(2),
+    bonusRate: 0,
+    bonusAmount: 0,
+    bonusQuota: 0,
+    creditAmount: 0,
+    quotedFor,
+  })
+
+  test('an outdated success publishes nothing and reports 0, so no dialog opens', async () => {
+    const next = latestOnly()
+    const published: PaymentQuote[] = []
+    let finishOld: (quote: PaymentQuote) => void = () => undefined
+    const oldAnswer = runQuote(
+      next(),
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve
+        }),
+      (quote) => published.push(quote)
+    )
+    const newAnswer = runQuote(
+      next(),
+      async () => {
+        throw new Error('the newest quote failed')
+      },
+      (quote) => published.push(quote)
+    )
+    assert.equal(await newAnswer, 0)
+    finishOld(quoteOf(2000, 2000))
+    assert.equal(await oldAnswer, 0, 'the old 2000 must not open a dialog')
+    assert.equal(published.length, 1)
+    assert.equal(published[0]?.money, 0, 'only the failure of the newest shows')
+  })
+
+  test('the newest answer publishes', async () => {
+    const next = latestOnly()
+    const published: PaymentQuote[] = []
+    const money = await runQuote(
+      next(),
+      async () => quoteOf(600, 600),
+      (quote) => published.push(quote)
+    )
+    assert.equal(money, 600)
+    assert.equal(published[0]?.quotedFor, 600)
+  })
+})
+
+describe('confirmableQuote', () => {
+  const quote = {
+    money: 600,
+    moneyText: '600.00',
+    bonusQuota: 10_500_000,
+    quotedFor: 600,
+  }
+
+  test('a real quote for this amount is what gets confirmed', () => {
+    assert.deepEqual(confirmableQuote(quote, 600), {
+      money: '600.00',
+      bonusQuota: 10_500_000,
+    })
+  })
+
+  test('nothing to confirm when the quote is for another amount, failed or empty', () => {
+    assert.equal(confirmableQuote(quote, 2000), null)
+    assert.equal(
+      confirmableQuote({ ...quote, money: 0, moneyText: '' }, 600),
+      null
+    )
+    assert.equal(
+      confirmableQuote(
+        { money: 0, moneyText: '', bonusQuota: 0, quotedFor: 0 },
+        0
+      ),
+      null
+    )
   })
 })
