@@ -83,13 +83,17 @@ func (e *TopUpWalletFullError) Is(target error) bool {
 }
 
 // topUpCreditQuota 是这张订单入账时会加的额度，与各渠道结算函数同一口径：
-// Stripe 按 Money × QuotaPerUnit；Creem 的 Amount 本身就是额度；其余按 Amount × QuotaPerUnit。
+// Stripe 按 Money × QuotaPerUnit；Creem 的 Amount 本身就是额度；其余按 Amount × QuotaPerUnit，
+// 再加建单时快照的赠送（BonusQuota，只有易支付与 USDT 的订单才可能非 0）。赠送为负的订单不合法，算 0。
 //
 // 结果被夹在 [0, 上限+1]：先比较完整的十进制数再转整数。数量离谱的订单乘出来会超过
 // int64，直接转换会绕回成一个看似正常的值（2^64 附近的乘积绕回后是个小正数）——那样的
 // 订单要么通过容量判断，要么把占用算小。超过上限的一律算「上限 + 1」，非正数算 0。
 func topUpCreditQuota(topUp *TopUp) int64 {
 	overLimit := int64(common.MaxQuota) + 1
+	if topUp.BonusQuota < 0 {
+		return 0
+	}
 	var credit decimal.Decimal
 	switch topUp.PaymentProvider {
 	case PaymentProviderStripe:
@@ -104,7 +108,7 @@ func topUpCreditQuota(topUp *TopUp) int64 {
 	case PaymentProviderCreem:
 		credit = decimal.NewFromInt(topUp.Amount)
 	default:
-		credit = decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+		credit = decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Add(decimal.NewFromInt(topUp.BonusQuota))
 	}
 	if credit.Sign() <= 0 {
 		return 0
