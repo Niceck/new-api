@@ -382,6 +382,10 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		return
 	}
 
+	if topUpBonusRefused(c, req.Amount, id, "Pancake") {
+		return
+	}
+
 	tradeNo := fmt.Sprintf("WAFFO_PANCAKE-%d-%d-%s", id, time.Now().UnixMilli(), randstr.String(6))
 	topUp := &model.TopUp{
 		UserId:          id,

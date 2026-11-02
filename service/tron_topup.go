@@ -254,6 +254,12 @@ func GetDefaultTronTopupService() (*tronTopupService, error) {
 }
 
 func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requestedAmount int64, payCNY decimal.Decimal, creditQuota int) (TronOrderView, error) {
+	return s.CreateOrderWithBonus(ctx, userID, requestedAmount, payCNY, creditQuota, 0)
+}
+
+// CreateOrderWithBonus 建 USDT 充值单。creditQuota 是全额到账的总额度（含赠送），容差入账按实到比例缩放的就是它，
+// 所以少付时赠送也同比例缩小、多付不多送；bonusQuota 是其中赠送的部分，只为展示与对账落在 top_ups 上。
+func (s *tronTopupService) CreateOrderWithBonus(ctx context.Context, userID int, requestedAmount int64, payCNY decimal.Decimal, creditQuota int, bonusQuota int64) (TronOrderView, error) {
 	if !s.config.Enabled || s.priceClient == nil || s.now == nil || s.probeSeedSource == nil || userID <= 0 || requestedAmount <= 0 || !payCNY.IsPositive() || payCNY.GreaterThan(decimal.NewFromInt(s.config.MaxCNY)) {
 		return TronOrderView{}, errors.New("TRON top-up amount is out of range")
 	}
@@ -314,7 +320,7 @@ func (s *tronTopupService) CreateOrder(ctx context.Context, userID int, requeste
 		}
 		tradeNo := "TRONUSR" + strconv.Itoa(userID) + "NO" + tradeSuffix
 		payMoney, _ := payCNY.Float64()
-		topUp := &model.TopUp{UserId: userID, Amount: requestedAmount, Money: payMoney, TradeNo: tradeNo, PaymentMethod: model.PaymentMethodTron, PaymentProvider: model.PaymentProviderTron, CreateTime: now.Unix(), Status: common.TopUpStatusPending}
+		topUp := &model.TopUp{UserId: userID, Amount: requestedAmount, Money: payMoney, TradeNo: tradeNo, PaymentMethod: model.PaymentMethodTron, PaymentProvider: model.PaymentProviderTron, CreateTime: now.Unix(), Status: common.TopUpStatusPending, BonusQuota: bonusQuota}
 		order := &model.TronTopupOrder{UserID: userID, TradeNo: tradeNo, ReceiveAddress: s.config.ReceiveAddress, TokenContract: tronUSDTContract, ExpectedAmountMicros: quote.ExpectedUSDTMicros, RateCNYMicros: quote.RateCNYMicros, QuoteUpdatedAtMS: quoteUpdatedAt.UnixMilli(), ExpiresAtMS: now.Add(s.config.OrderTTL).UnixMilli(), CreditQuota: quote.CreditQuota, CreatedAtMS: nowMS}
 		storedOrder, created, err := model.CreateOrGetActiveTronTopupOrderAt(topUp, order, func() int64 { return s.now().UnixMilli() })
 		if err != nil {

@@ -35,7 +35,7 @@ func withQuotaPerUnit(t *testing.T, value float64) {
 func TestTopUpWalletFullMessage_TellsHowMuchStillFits(t *testing.T) {
 	withQuotaPerUnit(t, 500_000)
 	// 上限 2147483647 / 500000 ≈ 4294.97；余额 2522 时还装得下 1772（向下取整）
-	message := topUpWalletFullMessage(walletFull(2522, 0, 0), 1)
+	message := topUpWalletFullMessage(walletFull(2522, 0, 0), 1, 0)
 	assert.Contains(t, message, "钱包上限")
 	assert.Contains(t, message, "最多可充 1772")
 	assert.NotContains(t, message, "尚未支付")
@@ -43,7 +43,7 @@ func TestTopUpWalletFullMessage_TellsHowMuchStillFits(t *testing.T) {
 
 func TestTopUpWalletFullMessage_MentionsPendingOrdersHoldingRoom(t *testing.T) {
 	withQuotaPerUnit(t, 500_000)
-	message := topUpWalletFullMessage(walletFull(522, 2000, 1), 1)
+	message := topUpWalletFullMessage(walletFull(522, 2000, 1), 1, 0)
 	assert.Contains(t, message, "最多可充 1772")
 	assert.Contains(t, message, "已计入 1 笔尚未支付的充值订单")
 	// 支付完成后占用变成余额，可充数量并不会增加——不能说「支付完成后释放」
@@ -54,12 +54,12 @@ func TestTopUpWalletFullMessage_MentionsPendingOrdersHoldingRoom(t *testing.T) {
 func TestTopUpWalletFullMessage_WhenNothingFitsSaysSpendFirst(t *testing.T) {
 	withQuotaPerUnit(t, 500_000)
 	// 余额 4294：剩不到 1 个单位
-	message := topUpWalletFullMessage(walletFull(4294, 0, 0), 1)
+	message := topUpWalletFullMessage(walletFull(4294, 0, 0), 1, 0)
 	assert.Contains(t, message, "暂时不能再充值")
 	assert.NotContains(t, message, "最多可充")
 
 	// 剩 94 个单位，但这个渠道最低要充 100：同样是「装不下一笔」
-	message = topUpWalletFullMessage(walletFull(4200, 0, 0), 100)
+	message = topUpWalletFullMessage(walletFull(4200, 0, 0), 100, 0)
 	assert.Contains(t, message, "暂时不能再充值")
 }
 
@@ -71,7 +71,7 @@ func TestTopUpWalletFullMessage_UsesRequestUnitsInTokensDisplay(t *testing.T) {
 	t.Cleanup(func() { setting.QuotaDisplayType = original })
 
 	// 按 tokens 展示时，下单数量的单位就是额度：1772 个充值单位 = 886000000
-	message := topUpWalletFullMessage(walletFull(2522, 0, 0), 1)
+	message := topUpWalletFullMessage(walletFull(2522, 0, 0), 1, 0)
 	// 这里给的是整数个充值单位对应的数量：多出来的零头不会入账，所以说「建议」而不是「最多」
 	assert.Contains(t, message, "建议充值数量不超过 886000000")
 	assert.NotContains(t, message, "最多可充")

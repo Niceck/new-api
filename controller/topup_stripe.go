@@ -107,6 +107,9 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": stripeNoDiscountMessage})
 		return
 	}
+	if topUpBonusRefused(c, req.Amount, id, "Stripe") {
+		return
+	}
 	user, _ := model.GetUserById(id, false)
 	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
 

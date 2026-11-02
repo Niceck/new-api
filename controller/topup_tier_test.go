@@ -180,7 +180,7 @@ func TestRequestEpay_StoresTierDiscountedMoney(t *testing.T) {
 func TestCreateTronTopupOrder_UsesTierQuote(t *testing.T) {
 	operations := &stubTronTopupOperations{createView: service.TronOrderView{TradeNo: "TRON-tier", Status: common.TopUpStatusPending}}
 	withTronControllerDependencies(t, operations)
-	calculateTronPaymentMoney = quoteTronPayMoney // 用真实口径，不用桩
+	calculateTronQuote = quoteTopUp // 用真实口径，不用桩
 	withQuotaPerUnit(t, 500_000)
 	withTopUpPricing(t, testAmountDiscount, testTierDiscount)
 	withFaceTotal(t, 2500, nil)

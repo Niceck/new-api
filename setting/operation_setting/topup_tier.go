@@ -36,9 +36,10 @@ const (
 
 // TopUpTier 一档累计充值等级。
 type TopUpTier struct {
-	Level     int     `json:"level"`     // 从 1 起，按门槛升序
-	Threshold int64   `json:"threshold"` // 累计到账面值门槛（下单口径的整数单位）
-	Discount  float64 `json:"discount"`  // 实付比例，0.92 = 9.2 折
+	Level     int     `json:"level"`           // 从 1 起，按门槛升序
+	Threshold int64   `json:"threshold"`       // 累计到账面值门槛（下单口径的整数单位）
+	Discount  float64 `json:"discount"`        // 实付比例，0.92 = 9.2 折；赠送模式下恒为 1
+	Bonus     float64 `json:"bonus,omitempty"` // 赠送比例，0.09 = 多送 9%；折扣模式下为 0（见 topup_bonus.go）
 }
 
 // ErrTierDiscountInvalid 配置不合法时的统一前缀，便于后台与运维脚本按前缀识别。

@@ -37,18 +37,20 @@ type stubTronTopupOperations struct {
 	claimTradeNo    string
 	claimTxID       string
 	resolveTicketID int64
+	createBonus     int64
 	resolveOrderID  int64
 	resolveResolver int
 	resolveNote     string
 	rejectTicketID  int64
 }
 
-func (s *stubTronTopupOperations) CreateOrder(_ context.Context, userID int, amount int64, payCNY decimal.Decimal, quota int) (service.TronOrderView, error) {
+func (s *stubTronTopupOperations) CreateOrderWithBonus(_ context.Context, userID int, amount int64, payCNY decimal.Decimal, quota int, bonusQuota int64) (service.TronOrderView, error) {
 	s.createCalls++
 	s.createUserID = userID
 	s.createAmount = amount
 	s.createPayCNY = payCNY
 	s.createQuota = quota
+	s.createBonus = bonusQuota
 	if s.createErr != nil {
 		return service.TronOrderView{}, s.createErr
 	}
@@ -85,12 +87,12 @@ func withTronControllerDependencies(t *testing.T, operations *stubTronTopupOpera
 	t.Helper()
 	originalOperations := getTronTopupOperations
 	originalGroup := getTronUserGroup
-	originalMoney := calculateTronPaymentMoney
+	originalQuote := calculateTronQuote
 	originalPublicConfig := getTronPublicConfig
 	originalCompliance := isTopupComplianceConfirmed
 	getTronTopupOperations = func() (tronTopupOperations, error) { return operations, nil }
 	getTronUserGroup = func(_ int, _ bool) (string, error) { return "default", nil }
-	calculateTronPaymentMoney = func(_ int64, _ string, _ int) (float64, error) { return 100, nil }
+	calculateTronQuote = func(_ int64, _ string, _ int) (topUpQuote, error) { return topUpQuote{Money: 100, Discount: 1}, nil }
 	getTronPublicConfig = func() (service.TronTopupConfig, bool) {
 		return service.TronTopupConfig{Enabled: true, Network: "mainnet", ReceiveAddress: "TQ2FF8nGsASkSJq6xW8MXhgbdAH6MDd83f"}, true
 	}
@@ -98,7 +100,7 @@ func withTronControllerDependencies(t *testing.T, operations *stubTronTopupOpera
 	t.Cleanup(func() {
 		getTronTopupOperations = originalOperations
 		getTronUserGroup = originalGroup
-		calculateTronPaymentMoney = originalMoney
+		calculateTronQuote = originalQuote
 		getTronPublicConfig = originalPublicConfig
 		isTopupComplianceConfirmed = originalCompliance
 	})

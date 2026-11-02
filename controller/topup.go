@@ -144,7 +144,8 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
+		"discount":                topUpInfoDiscount(),
+		"bonus":                   topUpInfoBonus(),
 		"tier":                    tierInfo,
 		"topup_link":              common.TopUpLink,
 	}
@@ -182,15 +183,20 @@ func GetEpayClient() *epay.Client {
 // 不静默按原价建单，让他稍后重试（2026-10-30 站长定）。
 const topUpTierUnavailableMessage = "获取充值等级失败，请稍后重试"
 
+// topUpBonusUnsupportedMessage 客户选了没接入赠送的渠道、这笔又本该有赠送时的提示。
+const topUpBonusUnsupportedMessage = "当前支付方式暂不支持充值赠送，请换用其他支付方式"
+
 // getUserTopUpFaceTotal 读用户累计到账面值；做成变量便于测试替换。
 var getUserTopUpFaceTotal = model.GetUserTopUpFaceTotal
 
-// topUpQuote 一次下单 / 试算的应付金额与它用上的折扣。
+// topUpQuote 一次下单 / 试算的应付金额与它用上的优惠。折扣与赠送不会同时存在。
 type topUpQuote struct {
-	Money    float64
-	Discount float64                      // 实际采用的折扣，1 = 原价
-	Tier     *operation_setting.TopUpTier // 采用了等级折扣时非空
-	Total    int64                        // 累计到账面值（配置了等级时才读）
+	Money      float64
+	Discount   float64                      // 实际采用的折扣，1 = 原价
+	Tier       *operation_setting.TopUpTier // 采用了等级折扣或等级赠送时非空
+	Total      int64                        // 累计到账面值（配置了等级时才读）
+	BonusRate  float64                      // 实际采用的赠送比例，0 = 不送
+	BonusQuota int64                        // 这笔多送的额度，落到订单的 BonusQuota
 }
 
 func (q topUpQuote) tierLevel() int {
@@ -243,6 +249,11 @@ func payMoneyWithDiscount(amount int64, group string, discount float64) float64 
 // 与各渠道实际收款一致。没配置等级时不读数据库，行为与以前完全一样；配置了等级而累计读不出来时返回错误，
 // 调用方要拒绝下单让客户稍后重试，不能静默按原价建单。
 func topUpDiscountFor(amount int64, userId int) (discount float64, tier *operation_setting.TopUpTier, total int64, err error) {
+	if operation_setting.TopUpBonusEnabled() {
+		// 赠送模式：实付恒等于面值，折扣表不生效，所以不会有既打折又赠送的订单。
+		// 切换时先写单笔赠送表、后清折扣表，靠的就是这一条：中间没有两头都占或两头都没有的窗口。
+		return 1, nil, 0, nil
+	}
 	discount = amountDiscountFor(amount)
 	tiers := operation_setting.TopUpTiers()
 	if len(tiers) == 0 {
@@ -258,25 +269,111 @@ func topUpDiscountFor(amount int64, userId int) (discount float64, tier *operati
 	return discount, nil, total, nil
 }
 
-// quoteTopUp 易支付下单、试算与 USDT 建单共用的应付金额。
+// topUpBonusRateForTotal 给定累计到账面值，这个面值的赠送比例：单笔满额与累计等级取高、不叠加。
+// 采用的是等级时第二个返回值非空。
+func topUpBonusRateForTotal(amount int64, total int64) (float64, *operation_setting.TopUpTier) {
+	if !operation_setting.TopUpBonusEnabled() {
+		return 0, nil
+	}
+	rate := operation_setting.AmountBonusRate(amount)
+	current, _ := operation_setting.TierForTotal(operation_setting.TopUpBonusTiers(), total)
+	if current != nil && current.Bonus > rate {
+		return current.Bonus, current
+	}
+	return rate, nil
+}
+
+// topUpBonusQuota 面值 × 比例 对应的额度。比例最多四位小数，本站 QuotaPerUnit 下恒为整数；别的配置下向下取整（少送不多送）。
+func topUpBonusQuota(amount int64, rate float64) int64 {
+	if amount <= 0 || rate <= 0 {
+		return 0
+	}
+	bonus := decimal.NewFromInt(amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Mul(decimal.NewFromFloat(rate)).Floor()
+	if bonus.GreaterThan(decimal.NewFromInt(int64(common.MaxQuota))) {
+		return int64(common.MaxQuota) // 面值本身已经超过钱包上限，容量判断会拒绝
+	}
+	return bonus.IntPart()
+}
+
+// topUpBonusFor 一次充值的赠送比例。配置了等级赠送而累计读不出来时返回错误，调用方要拒绝下单让客户稍后重试，
+// 不能静默少送。只配了单笔赠送时不读数据库。
+func topUpBonusFor(amount int64, userId int) (rate float64, tier *operation_setting.TopUpTier, total int64, err error) {
+	if !operation_setting.TopUpBonusEnabled() {
+		return 0, nil, 0, nil
+	}
+	if len(operation_setting.TopUpBonusTiers()) > 0 {
+		total, err = getUserTopUpFaceTotal(userId)
+		if err != nil {
+			return 0, nil, 0, fmt.Errorf("读取用户 %d 的累计充值失败: %w", userId, err)
+		}
+	}
+	rate, tier = topUpBonusRateForTotal(amount, total)
+	return rate, tier, total, nil
+}
+
+// quoteTopUp 易支付下单、试算与 USDT 建单共用的应付金额与赠送。
 func quoteTopUp(amount int64, group string, userId int) (topUpQuote, error) {
 	discount, tier, total, err := topUpDiscountFor(amount, userId)
 	if err != nil {
 		return topUpQuote{}, err
 	}
-	return topUpQuote{Money: payMoneyWithDiscount(amount, group, discount), Discount: discount, Tier: tier, Total: total}, nil
+	quote := topUpQuote{Money: payMoneyWithDiscount(amount, group, discount), Discount: discount, Tier: tier, Total: total}
+	rate, bonusTier, bonusTotal, err := topUpBonusFor(amount, userId)
+	if err != nil {
+		return topUpQuote{}, err
+	}
+	if rate > 0 {
+		quote.BonusRate, quote.BonusQuota, quote.Tier = rate, topUpBonusQuota(amount, rate), bonusTier
+	}
+	if operation_setting.TopUpBonusEnabled() {
+		quote.Total = bonusTotal
+	}
+	return quote, nil
 }
 
-// quoteTronPayMoney USDT 建单用的同一口径（topup_tron.go 的 calculateTronPaymentMoney）。
-func quoteTronPayMoney(amount int64, group string, userId int) (float64, error) {
-	quote, err := quoteTopUp(amount, group, userId)
-	return quote.Money, err
+// topUpBonusRefused 未接入赠送的渠道（Stripe、Waffo、Pancake）的建单前检查：这笔本该有赠送就拒绝并提示换渠道，
+// 不能让客户看着钱包页的「多送」付款、到账却没有。这些渠道本站都没启用。读累计失败同样拒绝。返回 true 表示已应答。
+func topUpBonusRefused(c *gin.Context, amount int64, userId int, gateway string) bool {
+	rate, _, _, err := topUpBonusFor(amount, userId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("%s 读取充值等级失败 user_id=%d amount=%d error=%q", gateway, userId, amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpTierUnavailableMessage})
+		return true
+	}
+	if rate > 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpBonusUnsupportedMessage})
+		return true
+	}
+	return false
+}
+
+// topUpInfoDiscount 钱包页的单笔折扣表：赠送模式下折扣不生效，不能再显示。
+func topUpInfoDiscount() map[int]float64 {
+	if operation_setting.TopUpBonusEnabled() {
+		return map[int]float64{}
+	}
+	return operation_setting.GetPaymentSetting().AmountDiscount
+}
+
+// topUpInfoBonus 钱包页的单笔赠送表（门槛 → 比例），没开启赠送时是空表。
+func topUpInfoBonus() map[int64]float64 {
+	table := map[int64]float64{}
+	if !operation_setting.TopUpBonusEnabled() {
+		return table
+	}
+	for _, step := range operation_setting.AmountBonusSteps() {
+		table[step.Threshold] = step.Bonus
+	}
+	return table
 }
 
 // topUpTierInfo 钱包页要显示的等级信息；没配置等级时为 nil。读累计失败只记日志、返回 (nil, true)：
-// 钱包页照常打开并提示等级暂不可用，下单时会再读一次并明确报错。
+// 钱包页照常打开并提示等级暂不可用，下单时会再读一次并明确报错。赠送模式下等级表来自赠送配置。
 func topUpTierInfo(c *gin.Context) (info gin.H, unavailable bool) {
 	tiers := operation_setting.TopUpTiers()
+	if operation_setting.TopUpBonusEnabled() {
+		tiers = operation_setting.TopUpBonusTiers()
+	}
 	if len(tiers) == 0 {
 		return nil, false
 	}
@@ -292,12 +389,18 @@ func topUpTierInfo(c *gin.Context) (info gin.H, unavailable bool) {
 		info["level"] = current.Level
 		info["discount"] = current.Discount
 		info["threshold"] = current.Threshold
+		if current.Bonus > 0 {
+			info["bonus"] = current.Bonus
+		}
 	}
 	if next != nil {
 		info["next_level"] = next.Level
 		info["next_threshold"] = next.Threshold
 		info["next_discount"] = next.Discount
 		info["remaining"] = next.Threshold - total
+		if next.Bonus > 0 {
+			info["next_bonus"] = next.Bonus
+		}
 	}
 	return info, false
 }
@@ -390,6 +493,7 @@ func RequestEpay(c *gin.Context) {
 		PaymentProvider: model.PaymentProviderEpay,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
+		BonusQuota:      quote.BonusQuota,
 	}
 	// 钱包上限在这里就判断，与建单同一个事务：入账环节也会拦超限，但那时客户已经付了钱，
 	// 订单只能卡在待处理。被拒的订单不落库，支付链接也不交出去。
@@ -397,7 +501,7 @@ func RequestEpay(c *gin.Context) {
 	var walletFull *model.TopUpWalletFullError
 	if errors.As(err, &walletFull) {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单未创建：入账后会超出钱包上限 user_id=%d payment_method=%s amount=%d detail=%q", id, req.PaymentMethod, req.Amount, walletFull.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpWalletFullMessage(walletFull, getMinTopup())})
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": topUpWalletFullMessage(walletFull, getMinTopup(), quote.Total)})
 		return
 	}
 	if err != nil {
@@ -405,7 +509,7 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f discount=%.2f tier_level=%d uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, payMoney, quote.Discount, quote.tierLevel(), uri, common.GetJsonString(params)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f discount=%.2f bonus_rate=%v bonus_quota=%d tier_level=%d uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, payMoney, quote.Discount, quote.BonusRate, quote.BonusQuota, quote.tierLevel(), uri, common.GetJsonString(params)))
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
 }
 
@@ -592,7 +696,16 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+	response := gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)}
+	if quote.BonusQuota > 0 {
+		// 确认框里「赠送 / 到账」以这里为准，钱包页按配置算的角标只是预览。单位与面值相同（quota ÷ QuotaPerUnit）。
+		perUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		bonus := decimal.NewFromInt(quote.BonusQuota).Div(perUnit)
+		response["bonus_rate"] = quote.BonusRate
+		response["bonus_amount"] = bonus.InexactFloat64()
+		response["credit_amount"] = decimal.NewFromInt(req.Amount).Add(bonus).InexactFloat64()
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func GetUserTopUps(c *gin.Context) {

@@ -8,6 +8,11 @@ type PaymentSetting struct {
 	// TierDiscount 累计充值等级：键 = 累计到账面值门槛，值 = 达到后每笔充值的折扣（实付比例，最多两位小数）。
 	// 与 AmountDiscount 取对客户更优的一个，不叠加。见 topup_tier.go。
 	TierDiscount map[int]float64 `json:"tier_discount"`
+	// AmountBonus 单笔满额赠送：键 = 单笔面值门槛，值 = 赠送比例（0.035 = 多送 3.5%）。见 topup_bonus.go。
+	AmountBonus map[int]float64 `json:"amount_bonus"`
+	// TierBonus 累计充值等级赠送：键 = 累计到账面值门槛，值 = 达到后每笔充值的赠送比例。与 AmountBonus 取高、不叠加。
+	// AmountBonus 非空就是赠送模式：上面两张折扣表不再生效（实付恒等于面值），TierBonus 也只在这时才生效。
+	TierBonus map[int]float64 `json:"tier_bonus"`
 
 	ComplianceConfirmed    bool   `json:"compliance_confirmed"`
 	ComplianceTermsVersion string `json:"compliance_terms_version"`
@@ -23,6 +28,8 @@ var paymentSetting = PaymentSetting{
 	AmountOptions:  []int{10, 20, 50, 100, 200, 500},
 	AmountDiscount: map[int]float64{},
 	TierDiscount:   map[int]float64{},
+	AmountBonus:    map[int]float64{},
+	TierBonus:      map[int]float64{},
 }
 
 func init() {

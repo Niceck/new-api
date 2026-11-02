@@ -225,6 +225,14 @@ func validateOptionValue(key string, value string) error {
 		// 累计充值等级直接决定应付金额，配置框架对解析失败又是静默跳过：所有写入路径都要在这里拦住
 		return operation_setting.ValidateTierDiscountJSON(value)
 	}
+	if key == operation_setting.AmountBonusOptionKey || key == operation_setting.TierBonusOptionKey {
+		// 充值赠送直接决定到账额度，同上
+		return operation_setting.ValidateTopUpBonusJSON(value)
+	}
+	if key == quotaDisplayTypeOptionKey && value == operation_setting.QuotaDisplayTypeTokens &&
+		operation_setting.TopUpBonusConfigured() {
+		return errors.New("已配置充值赠送，不能切换为按 tokens 展示；请先把 " + operation_setting.AmountBonusOptionKey + " 与 " + operation_setting.TierBonusOptionKey + " 清成 {}")
+	}
 	if key == quotaDisplayTypeOptionKey && value == operation_setting.QuotaDisplayTypeTokens &&
 		len(operation_setting.TopUpTiers()) > 0 {
 		// 反向也要拦：先按货币配好等级、再切到 tokens 展示，各支付渠道订单面值的单位就不一致了
@@ -676,6 +684,11 @@ func handleConfigUpdate(key, value string) bool {
 			// 同上：绕过校验进库的值。配置框架对解析失败静默跳过（进程里还是旧表），语义非法的会进表、
 			// 再由 TopUpTiers 按没有等级处理；两种情形这里都先记一笔，别静默成「没配置等级」
 			common.SysError("库里的 " + key + " 不合规，累计充值等级可能没有按预期生效：" + err.Error())
+		}
+	}
+	if key == operation_setting.AmountBonusOptionKey || key == operation_setting.TierBonusOptionKey {
+		if err := operation_setting.ValidateTopUpBonusJSON(value); err != nil {
+			common.SysError("库里的 " + key + " 不合规，充值赠送可能没有按预期生效：" + err.Error())
 		}
 	}
 

@@ -261,6 +261,9 @@ func validateNewTronTopupOrder(topUp *TopUp, order *TronTopupOrder) error {
 	if order.ExpectedAmountMicros <= 0 || order.RateCNYMicros <= 0 || order.CreditQuota <= 0 || order.CreditQuota > common.MaxQuota || order.ExpiresAtMS <= order.CreatedAtMS || topUp.CreateTime != order.CreatedAtMS/1000 {
 		return errors.New("invalid TRON top-up amounts")
 	}
+	if topUp.BonusQuota < 0 || topUp.BonusQuota >= int64(order.CreditQuota) {
+		return errors.New("invalid TRON top-up bonus")
+	}
 	return nil
 }
 

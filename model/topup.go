@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,9 @@ type TopUp struct {
 	CreateTime      int64   `json:"create_time"`
 	CompleteTime    int64   `json:"complete_time"`
 	Status          string  `json:"status"`
+	// BonusQuota 这张订单入账时多送的额度，建单时算好落库（2026-11-02 充值赠送）：入账只认这个快照，
+	// 之后改配置不影响在途订单；老订单与折扣单是 0，入账与原来完全一样。不计入累计充值（累计只算 Amount）。
+	BonusQuota int64 `json:"bonus_quota" gorm:"type:bigint;not null;default:0"`
 	// Set on read for settled TRON top-ups only, never stored: the USDT that
 	// arrived, the quota actually credited and the order's face quota. Amount
 	// and Money above stay the order's quoted values.
@@ -364,6 +368,23 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 	return topups, total, nil
 }
 
+// topUpBonusLogNote 充值日志里说明这次入账含多少赠送；没有赠送时是空串，日志与原来一字不差。
+func topUpBonusLogNote(bonusQuota int64) string {
+	if bonusQuota <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("（含赠送 %v）", logger.FormatQuota(int(bonusQuota)))
+}
+
+// TopUpFaceQuota 面值对应的额度（不含赠送）。超出 int64 时饱和，调用方都会再和钱包上限比。
+func TopUpFaceQuota(amount int64) int64 {
+	credit := decimal.NewFromInt(amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	if credit.GreaterThan(decimal.NewFromInt(math.MaxInt64)) {
+		return math.MaxInt64
+	}
+	return credit.IntPart()
+}
+
 // decimalQuotaForAmount 把易支付口径的美元数量换算成额度。
 // 易支付订单的 Amount 是美元数量，额度 = Amount * QuotaPerUnit。
 func decimalQuotaForAmount(amount int64) int64 {
@@ -391,6 +412,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney string, 
 
 	var userId int
 	var payMoney float64
+	var bonusQuota int64
 	var storedPaymentMethod string
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
@@ -425,7 +447,8 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney string, 
 				ErrTopUpAmountMismatch, EpayOrderMoney(topUp.Money), paidMoney)
 		}
 
-		quotaToAdd := decimalQuotaForAmount(topUp.Amount)
+		// 与下单时的容量判断、管理员补单同一口径：面值额度 + 建单时快照的赠送
+		quotaToAdd := topUpCreditQuota(topUp)
 		if quotaToAdd <= 0 || quotaToAdd > int64(common.MaxQuota) {
 			return errors.New("无效的充值额度")
 		}
@@ -455,6 +478,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney string, 
 		}
 
 		creditedQuota = int(quotaToAdd)
+		bonusQuota = topUp.BonusQuota
 		userId = topUp.UserId
 		payMoney = topUp.Money
 		storedPaymentMethod = topUp.PaymentMethod
@@ -471,7 +495,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney string, 
 				common.SysError("failed to increase cached user quota after epay topup: " + cacheErr.Error())
 			}
 		}
-		RecordTopupLog(userId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.FormatQuota(creditedQuota), payMoney), callerIp, storedPaymentMethod, PaymentProviderEpay)
+		RecordTopupLog(userId, fmt.Sprintf("使用在线充值成功，充值金额: %v%s，支付金额：%f", logger.FormatQuota(creditedQuota), topUpBonusLogNote(bonusQuota), payMoney), callerIp, storedPaymentMethod, PaymentProviderEpay)
 	}
 	return creditedQuota, nil
 }
@@ -489,6 +513,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 	var userId int
 	var quotaToAdd int
+	var bonusQuota int64
 	var payMoney float64
 	var paymentMethod string
 
@@ -542,6 +567,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return err
 		}
 
+		bonusQuota = topUp.BonusQuota
 		userId = topUp.UserId
 		payMoney = topUp.Money
 		paymentMethod = topUp.PaymentMethod
@@ -553,7 +579,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	}
 
 	// 事务外记录日志，避免阻塞
-	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
+	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v%s，支付金额：%f", logger.FormatQuota(quotaToAdd), topUpBonusLogNote(bonusQuota), payMoney), callerIp, paymentMethod, "admin")
 	return nil
 }
 func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {

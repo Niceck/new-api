@@ -214,6 +214,10 @@ func RequestWaffoPay(c *gin.Context) {
 		return
 	}
 
+	if topUpBonusRefused(c, req.Amount, id, "Waffo") {
+		return
+	}
+
 	// 生成唯一订单号，paymentRequestId 与 merchantOrderId 保持一致，简化追踪
 	merchantOrderId := fmt.Sprintf("WAFFO-%d-%d-%s", id, time.Now().UnixMilli(), randstr.String(6))
 	paymentRequestId := merchantOrderId

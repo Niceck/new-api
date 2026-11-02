@@ -20,7 +20,7 @@ import (
 )
 
 type tronTopupOperations interface {
-	CreateOrder(ctx context.Context, userID int, amount int64, payCNY decimal.Decimal, quota int) (service.TronOrderView, error)
+	CreateOrderWithBonus(ctx context.Context, userID int, amount int64, payCNY decimal.Decimal, quota int, bonusQuota int64) (service.TronOrderView, error)
 	GetOrder(userID int, tradeNo string) (service.TronOrderView, error)
 	SubmitClaim(userID int, tradeNo string, txID string, note string) (*model.TronTopupTicket, error)
 	ListTickets(pageInfo *common.PageInfo, status string) ([]*model.TronTopupTicket, int64, error)
@@ -33,7 +33,7 @@ var (
 	tronControllerTxIDPattern = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 	getTronTopupOperations    = defaultTronTopupOperations
 	getTronUserGroup          = model.GetUserGroup
-	calculateTronPaymentMoney = quoteTronPayMoney
+	calculateTronQuote        = quoteTopUp
 	getTronPublicConfig       = service.GetTronTopupPublicConfig
 )
 
@@ -79,13 +79,13 @@ func CreateTronTopupOrder(c *gin.Context) {
 		common.ApiErrorMsg(c, "获取用户分组失败")
 		return
 	}
-	payMoneyCNY, err := calculateTronPaymentMoney(request.Amount, group, userID)
+	quote, err := calculateTronQuote(request.Amount, group, userID)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("TRON 读取充值等级失败 user_id=%d amount=%d error=%q", userID, request.Amount, err.Error()))
 		common.ApiErrorMsg(c, topUpTierUnavailableMessage)
 		return
 	}
-	payCNY := decimal.NewFromFloat(payMoneyCNY)
+	payCNY := decimal.NewFromFloat(quote.Money)
 	if !payCNY.IsPositive() {
 		common.ApiErrorMsg(c, "充值金额无效")
 		return
@@ -95,7 +95,8 @@ func CreateTronTopupOrder(c *gin.Context) {
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		accountingAmount = decimal.NewFromInt(request.Amount).Div(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart()
 	}
-	quotaDecimal := decimal.NewFromInt(accountingAmount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	// 全额到账的总额度含赠送；容差入账（少付）按它同比例缩放，赠送一并缩小
+	quotaDecimal := decimal.NewFromInt(accountingAmount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Add(decimal.NewFromInt(quote.BonusQuota))
 	creditQuota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
 	if clamp != nil || creditQuota <= 0 {
 		common.ApiErrorMsg(c, "充值金额超过安全上限")
@@ -106,7 +107,7 @@ func CreateTronTopupOrder(c *gin.Context) {
 		common.ApiErrorMsg(c, "TRON 充值暂不可用")
 		return
 	}
-	order, err := operations.CreateOrder(c.Request.Context(), userID, accountingAmount, payCNY, creditQuota)
+	order, err := operations.CreateOrderWithBonus(c.Request.Context(), userID, accountingAmount, payCNY, creditQuota, quote.BonusQuota)
 	if err != nil {
 		if errors.Is(err, service.ErrTronAmountBelowMinimum) {
 			common.ApiErrorMsg(c, "USDT 充值金额低于最低限额，请提高充值金额")
@@ -116,7 +117,7 @@ func CreateTronTopupOrder(c *gin.Context) {
 		var walletFull *model.TopUpWalletFullError
 		if errors.As(err, &walletFull) {
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("TRON 充值订单未创建：入账后会超出钱包上限 user_id=%d amount=%d detail=%q", userID, request.Amount, walletFull.Error()))
-			common.ApiErrorMsg(c, topUpWalletFullMessage(walletFull, max(getMinTopup(), getTronMinTopup())))
+			common.ApiErrorMsg(c, topUpWalletFullMessage(walletFull, max(getMinTopup(), getTronMinTopup()), quote.Total))
 			return
 		}
 		logger.LogWarn(c.Request.Context(), "create TRON top-up order failed: "+err.Error())
