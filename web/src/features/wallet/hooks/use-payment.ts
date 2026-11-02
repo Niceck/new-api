@@ -60,16 +60,49 @@ const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
 /** What the server quoted: money to pay and, when there is one, the bonus. */
 export interface PaymentQuote {
   money: number
+  /** The money exactly as the server wrote it; sent back when confirming */
+  moneyText: string
   bonusRate: number
   bonusAmount: number
+  bonusQuota: number
   creditAmount: number
+  /** Which top-up amount this quote is for */
+  quotedFor: number
 }
 
 const emptyPaymentQuote: PaymentQuote = {
   money: 0,
+  moneyText: '',
   bonusRate: 0,
   bonusAmount: 0,
+  bonusQuota: 0,
   creditAmount: 0,
+  quotedFor: 0,
+}
+
+/**
+ * Quotes can come back out of order (typing 2000 then 600). Each call gets a
+ * ticket; only the newest ticket may publish its result, so a late answer for
+ * an older amount can never show that amount's bonus next to the new one.
+ */
+export function latestOnly(): () => () => boolean {
+  let latest = 0
+  return () => {
+    latest += 1
+    const ticket = latest
+    return () => ticket === latest
+  }
+}
+
+/** A failed order answers {message:'error', data:'<the reason>'}: show the reason. */
+export function paymentErrorMessage(response: {
+  message?: string
+  data?: unknown
+}): string | undefined {
+  if (response.message === 'error' && typeof response.data === 'string') {
+    return response.data
+  }
+  return response.message
 }
 
 export async function requestPaymentQuote(
@@ -88,14 +121,17 @@ export async function requestPaymentQuote(
 
   const response = await calculator({ amount: topupAmount })
   if (!isApiSuccess(response) || !response.data) {
-    return emptyPaymentQuote
+    return { ...emptyPaymentQuote, quotedFor: topupAmount }
   }
 
   return {
     money: Number.parseFloat(response.data),
+    moneyText: response.data,
     bonusRate: response.bonus_rate ?? 0,
     bonusAmount: response.bonus_amount ?? 0,
+    bonusQuota: response.bonus_quota ?? 0,
     creditAmount: response.credit_amount ?? 0,
+    quotedFor: topupAmount,
   }
 }
 
@@ -112,28 +148,40 @@ export function usePayment() {
   const [quote, setQuote] = useState<PaymentQuote>(emptyPaymentQuote)
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [nextQuoteTicket] = useState(latestOnly)
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
     async (topupAmount: number, paymentType: string) => {
+      const isLatest = nextQuoteTicket()
       try {
         setCalculating(true)
         const calculated = await requestPaymentQuote(topupAmount, paymentType)
-        setQuote(calculated)
+        if (isLatest()) {
+          setQuote(calculated)
+        }
         return calculated.money
       } catch {
-        setQuote(emptyPaymentQuote)
+        if (isLatest()) {
+          setQuote(emptyPaymentQuote)
+        }
         return 0
       } finally {
-        setCalculating(false)
+        if (isLatest()) {
+          setCalculating(false)
+        }
       }
     },
-    []
+    [nextQuoteTicket]
   )
 
   // Process payment
   const processPayment = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      confirmed?: { money: string; bonusQuota: number }
+    ) => {
       try {
         setProcessing(true)
 
@@ -148,10 +196,18 @@ export function usePayment() {
           : await requestPayment({
               amount,
               payment_method: paymentType,
+              ...(confirmed
+                ? {
+                    expected_money: confirmed.money,
+                    expected_bonus_quota: confirmed.bonusQuota,
+                  }
+                : {}),
             })
 
         if (!isApiSuccess(response)) {
-          toast.error(response.message || i18next.t('Payment request failed'))
+          toast.error(
+            paymentErrorMessage(response) || i18next.t('Payment request failed')
+          )
           return false
         }
 
@@ -189,9 +245,12 @@ export function usePayment() {
 
   return {
     amount: quote.money,
+    moneyText: quote.moneyText,
     bonusRate: quote.bonusRate,
     bonusAmount: quote.bonusAmount,
+    bonusQuota: quote.bonusQuota,
     creditAmount: quote.creditAmount,
+    quotedFor: quote.quotedFor,
     calculating,
     processing,
     calculatePaymentAmount,

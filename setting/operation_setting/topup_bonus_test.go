@@ -91,6 +91,34 @@ func TestTopUpBonusEnabled_AmountTableIsTheOnlySwitch(t *testing.T) {
 	assert.True(t, TopUpBonusEnabled())
 }
 
+func TestTopUpBonusOffer_IsASnapshotThatDoesNotFollowLaterChanges(t *testing.T) {
+	withQuotaDisplay(t, QuotaDisplayTypeCNY)
+	withBonusTables(t, productionAmountBonus, productionTierBonus)
+	offer := CurrentTopUpBonusOffer()
+	require.True(t, offer.Enabled())
+
+	// 报价途中配置被清空：手里这份快照还是原来的，这一笔不会算成两样都没有
+	GetPaymentSetting().AmountBonus = map[int]float64{}
+	GetPaymentSetting().TierBonus = map[int]float64{}
+	rate, tier := offer.RateFor(600, 0)
+	assert.Equal(t, 0.035, rate)
+	assert.Nil(t, tier)
+	rate, tier = offer.RateFor(100, 3000)
+	assert.Equal(t, 0.035, rate)
+	require.NotNil(t, tier)
+	assert.Equal(t, 2, tier.Level)
+	assert.False(t, CurrentTopUpBonusOffer().Enabled())
+}
+
+func TestCurrentTopUpBonusOffer_TierTableAloneIsNotAnOffer(t *testing.T) {
+	withQuotaDisplay(t, QuotaDisplayTypeCNY)
+	withBonusTables(t, map[int]float64{}, productionTierBonus)
+	assert.False(t, CurrentTopUpBonusOffer().Enabled())
+	withBonusTables(t, productionAmountBonus, productionTierBonus)
+	withQuotaDisplay(t, QuotaDisplayTypeTokens)
+	assert.False(t, CurrentTopUpBonusOffer().Enabled())
+}
+
 func TestBadRuntimeTableMeansNoBonus(t *testing.T) {
 	// 绕过校验进库的坏表：按没有赠送处理（客户付面值、到账面值），不会多送也不会 panic
 	withBonusTables(t, map[int]float64{200: 5}, map[int]float64{1000: -1})

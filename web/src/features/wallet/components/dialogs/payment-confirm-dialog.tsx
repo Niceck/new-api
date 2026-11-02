@@ -183,7 +183,10 @@ export function PaymentConfirmDialog({
           <AlertDialogCancel disabled={processing}>
             {t('Cancel')}
           </AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} disabled={processing}>
+          <AlertDialogAction
+            onClick={onConfirm}
+            disabled={processing || calculating}
+          >
             {processing && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
             {t('Confirm Payment')}
           </AlertDialogAction>

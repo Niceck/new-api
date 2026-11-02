@@ -172,16 +172,54 @@ func TopUpBonusTiers() []TopUpTier {
 	return bonusSteps(GetPaymentSetting().TierBonus)
 }
 
-// AmountBonusRate 这个面值的单笔赠送比例：取不超过面值的最高一档，没有则为 0。
-func AmountBonusRate(amount int64) float64 {
+func rateInSteps(steps []TopUpTier, amount int64) float64 {
 	rate := 0.0
-	for _, step := range AmountBonusSteps() {
+	for _, step := range steps {
 		if amount < step.Threshold {
 			break
 		}
 		rate = step.Bonus
 	}
 	return rate
+}
+
+// AmountBonusRate 这个面值的单笔赠送比例：取不超过面值的最高一档，没有则为 0。
+func AmountBonusRate(amount int64) float64 {
+	return rateInSteps(AmountBonusSteps(), amount)
+}
+
+// TopUpBonusOffer 一次报价用的赠送配置快照：判断模式、取比例都从这一份来。
+// 报价过程里还要查库读累计，中途配置可能切换；要是分开读，就会算出既打折又赠送、或两样都没有的订单。
+type TopUpBonusOffer struct {
+	Steps []TopUpTier // 单笔区间，空 = 不是赠送模式
+	Tiers []TopUpTier // 累计等级
+}
+
+// CurrentTopUpBonusOffer 取一份快照。先读开关（单笔表）再读等级表：切换时等级表先写好、开关后开，所以开关开着时等级表一定在。
+func CurrentTopUpBonusOffer() TopUpBonusOffer {
+	if GetQuotaDisplayType() == QuotaDisplayTypeTokens {
+		return TopUpBonusOffer{}
+	}
+	steps := AmountBonusSteps()
+	if len(steps) == 0 {
+		return TopUpBonusOffer{}
+	}
+	return TopUpBonusOffer{Steps: steps, Tiers: TopUpBonusTiers()}
+}
+
+// Enabled 这份快照是不是赠送模式。
+func (o TopUpBonusOffer) Enabled() bool {
+	return len(o.Steps) > 0
+}
+
+// RateFor 给定累计到账面值，这个面值的赠送比例：单笔区间与累计等级取高、不叠加。采用的是等级时第二个返回值非空。
+func (o TopUpBonusOffer) RateFor(amount int64, total int64) (float64, *TopUpTier) {
+	rate := rateInSteps(o.Steps, amount)
+	current, _ := TierForTotal(o.Tiers, total)
+	if current != nil && current.Bonus > rate {
+		return current.Bonus, current
+	}
+	return rate, nil
 }
 
 // TopUpBonusConfigured 两张赠送表有没有写过内容（不看展示类型），切 tokens 展示前的检查用。

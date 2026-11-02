@@ -97,9 +97,12 @@ export function Wallet(props: WalletProps) {
   }, [currency?.quotaDisplayType, currency?.usdExchangeRate])
   const {
     amount: paymentAmount,
-    bonusRate: paymentBonusRate,
-    bonusAmount: paymentBonusAmount,
-    creditAmount: paymentCreditAmount,
+    moneyText: paymentMoneyText,
+    bonusRate: quotedBonusRate,
+    bonusAmount: quotedBonusAmount,
+    bonusQuota: paymentBonusQuota,
+    creditAmount: quotedCreditAmount,
+    quotedFor,
     calculating,
     processing,
     calculatePaymentAmount,
@@ -110,6 +113,13 @@ export function Wallet(props: WalletProps) {
   const { processing: waffoProcessing, processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
+
+  // A quote only speaks for the amount it was asked about: while the field and
+  // the quote disagree, show no bonus rather than another amount's bonus.
+  const quoteIsCurrent = quotedFor === topupAmount
+  const paymentBonusRate = quoteIsCurrent ? quotedBonusRate : 0
+  const paymentBonusAmount = quoteIsCurrent ? quotedBonusAmount : 0
+  const paymentCreditAmount = quoteIsCurrent ? quotedCreditAmount : 0
 
   // Fetch and refresh user data
   const fetchUser = useCallback(async () => {
@@ -224,7 +234,16 @@ export function Wallet(props: WalletProps) {
       topupAmount,
       selectedWaffoMethodIndex,
       {
-        regular: processPayment,
+        // The order must match what the dialog showed; the server refuses
+        // otherwise and the new quote is shown below.
+        regular: (amount, type) =>
+          processPayment(
+            amount,
+            type,
+            quoteIsCurrent && paymentMoneyText
+              ? { money: paymentMoneyText, bonusQuota: paymentBonusQuota }
+              : undefined
+          ),
         waffo: processWaffoPayment,
         waffoPancake: processWaffoPancakePayment,
       }
@@ -233,7 +252,14 @@ export function Wallet(props: WalletProps) {
     if (success) {
       setConfirmDialogOpen(false)
       await refreshAfterTopUp()
+      return
     }
+    // Refused (the offer may have changed): show the current quote and level
+    // in the dialog so the customer can confirm what is true now.
+    await Promise.all([
+      calculatePaymentAmount(topupAmount, selectedPaymentMethod.type),
+      refetchTopupInfo(),
+    ])
   }
 
   // Handle redemption

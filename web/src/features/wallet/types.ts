@@ -37,6 +37,8 @@ export type RedemptionResponse = ApiResponse<number>
 export type AmountResponse = ApiResponse<string> & {
   /** Bonus rate of this quote; absent when the top-up earns no bonus */
   bonus_rate?: number
+  /** Bonus credit of this quote, in quota; sent back when confirming */
+  bonus_quota?: number
   /** Bonus credit of this quote, in top-up units */
   bonus_amount?: number
   /** Face value plus bonus, in top-up units */
@@ -277,6 +279,10 @@ export interface PaymentRequest {
   amount: number
   /** Payment method identifier */
   payment_method: string
+  /** Money shown in the confirm dialog; the server refuses if it no longer holds */
+  expected_money?: string
+  /** Bonus shown in the confirm dialog, in quota; the server refuses if it no longer holds */
+  expected_bonus_quota?: number
 }
 
 /**

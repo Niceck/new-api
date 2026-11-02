@@ -118,6 +118,62 @@ func TestQuoteTopUp_TierTableAloneDoesNotSwitchModes(t *testing.T) {
 	assert.Zero(t, quote.BonusQuota)
 }
 
+func TestQuoteTopUp_ConfigSwitchDuringTheQuoteNeverMixesTheTwoOffers(t *testing.T) {
+	// 读累计（查库）正好发生在配置切换的时候：两个方向都要全按开始时的那一份算
+	flip := func(amount, tier, discount, tierDiscount map[int]float64) func(int) (int64, error) {
+		return func(_ int) (int64, error) {
+			ps := operation_setting.GetPaymentSetting()
+			ps.AmountBonus, ps.TierBonus, ps.AmountDiscount, ps.TierDiscount = amount, tier, discount, tierDiscount
+			return 10000, nil
+		}
+	}
+	empty := map[int]float64{}
+
+	withTopUpBonus(t, empty, empty)
+	withTopUpPricing(t, testAmountDiscount, testTierDiscount)
+	original := getUserTopUpFaceTotal
+	t.Cleanup(func() { getUserTopUpFaceTotal = original })
+
+	// 折扣 → 赠送：开始时是折扣，这一笔只打折、不送
+	getUserTopUpFaceTotal = flip(testAmountBonus, testTierBonus, testAmountDiscount, testTierDiscount)
+	quote, err := quoteTopUp(500, "default", 1)
+	require.NoError(t, err)
+	assert.InDelta(t, 460, quote.Money, 1e-9, "VIP4 按 9.2 折")
+	assert.Zero(t, quote.BonusQuota, "既打折又赠送就是多给钱")
+
+	// 赠送 → 折扣：上一步已切到赠送，这一笔开始时是赠送，查库途中切回折扣：只送、不打折，赠送也不能丢
+	getUserTopUpFaceTotal = flip(empty, empty, testAmountDiscount, testTierDiscount)
+	quote, err = quoteTopUp(500, "default", 1)
+	require.NoError(t, err)
+	assert.InDelta(t, 500, quote.Money, 1e-9, "全价")
+	assert.Equal(t, int64(22_500_000), quote.BonusQuota, "VIP4 500 × 9% = ¥45，两样都没有就是少给钱")
+}
+
+func TestRequestEpay_RefusesWhenTheConfirmedQuoteNoLongerHolds(t *testing.T) {
+	db := setupEpayCallbackTest(t)
+	require.NoError(t, db.AutoMigrate(&model.TronTopupOrder{}))
+	withTopUpBonus(t, testAmountBonus, testTierBonus)
+	seedWalletUser(t, 9417, 0)
+	withFaceTotal(t, 0, nil)
+
+	request := func(body string) string {
+		return tronHandlerResponse(t, http.MethodPost, "/", body, 9417, RequestEpay).Body.String()
+	}
+	// 确认框看到的和现在一样：照常建单
+	assert.Contains(t, request(`{"amount":600,"payment_method":"alipay","expected_money":"600.00","expected_bonus_quota":10500000}`), `"message":"success"`)
+	assert.Equal(t, int64(1), topUpCount(t, 9417))
+	// 确认的是旧折扣价
+	assert.Contains(t, request(`{"amount":600,"payment_method":"alipay","expected_money":"582.00","expected_bonus_quota":10500000}`), topUpQuoteChangedMessage)
+	// 确认时赠送更多，现在少了：不能悄悄少送
+	assert.Contains(t, request(`{"amount":600,"payment_method":"alipay","expected_money":"600.00","expected_bonus_quota":99999999}`), topUpQuoteChangedMessage)
+	assert.Equal(t, int64(1), topUpCount(t, 9417), "对不上就不建单")
+	// 确认时没赠送（0），现在有了（升级了）：也请客户看一眼新的
+	withFaceTotal(t, 2500, nil)
+	assert.Contains(t, request(`{"amount":100,"payment_method":"alipay","expected_money":"100.00","expected_bonus_quota":0}`), topUpQuoteChangedMessage)
+	// 老页面不带这两个字段：不比对
+	assert.Contains(t, request(`{"amount":100,"payment_method":"alipay"}`), `"message":"success"`)
+}
+
 func TestQuoteTopUp_OnlyAmountBonusNeverTouchesTheDatabase(t *testing.T) {
 	withTopUpBonus(t, testAmountBonus, map[int]float64{})
 	calls := withFaceTotal(t, 0, errors.New("不该读"))
@@ -148,6 +204,7 @@ func TestRequestAmount_ReportsBonusWhenThereIsOne(t *testing.T) {
 	assert.InDelta(t, 0.035, body["bonus_rate"], 1e-9)
 	assert.InDelta(t, 17.5, body["bonus_amount"], 1e-9)
 	assert.InDelta(t, 517.5, body["credit_amount"], 1e-9)
+	assert.EqualValues(t, 8_750_000, body["bonus_quota"], "确认时原样带回来")
 
 	// 没有赠送的金额：响应与以前一样，没有多余字段
 	withFaceTotal(t, 0, nil)

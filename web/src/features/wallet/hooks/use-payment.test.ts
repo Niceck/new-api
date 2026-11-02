@@ -21,7 +21,12 @@ import { describe, test } from 'node:test'
 
 import { PAYMENT_TYPES } from '../constants'
 import type { AmountResponse } from '../types'
-import { requestPaymentAmount, requestPaymentQuote } from './use-payment'
+import {
+  latestOnly,
+  paymentErrorMessage,
+  requestPaymentAmount,
+  requestPaymentQuote,
+} from './use-payment'
 
 describe('payment amount routing', () => {
   test('uses the dedicated Waffo amount calculator', async () => {
@@ -64,15 +69,19 @@ describe('payment quote', () => {
         success: true,
         data: '500.00',
         bonus_rate: 0.035,
+        bonus_quota: 8_750_000,
         bonus_amount: 17.5,
         credit_amount: 517.5,
       })
     )
     assert.deepEqual(quote, {
       money: 500,
+      moneyText: '500.00',
       bonusRate: 0.035,
       bonusAmount: 17.5,
+      bonusQuota: 8_750_000,
       creditAmount: 517.5,
+      quotedFor: 500,
     })
   })
 
@@ -84,9 +93,12 @@ describe('payment quote', () => {
     )
     assert.deepEqual(quote, {
       money: 100,
+      moneyText: '100.00',
       bonusRate: 0,
       bonusAmount: 0,
+      bonusQuota: 0,
       creditAmount: 0,
+      quotedFor: 100,
     })
   })
 
@@ -105,5 +117,35 @@ describe('payment quote', () => {
       ),
       100
     )
+  })
+})
+
+describe('latestOnly', () => {
+  test('a late answer for an older request is not the latest', () => {
+    const next = latestOnly()
+    const first = next()
+    assert.equal(first(), true)
+    const second = next()
+    assert.equal(
+      first(),
+      false,
+      '2000 was typed first: its answer must be dropped'
+    )
+    assert.equal(second(), true)
+  })
+})
+
+describe('paymentErrorMessage', () => {
+  test('shows the reason, not the word error', () => {
+    assert.equal(
+      paymentErrorMessage({
+        message: 'error',
+        data: '充值优惠有更新，请重新确认金额',
+      }),
+      '充值优惠有更新，请重新确认金额'
+    )
+    assert.equal(paymentErrorMessage({ message: '无权限' }), '无权限')
+    assert.equal(paymentErrorMessage({ message: 'error', data: {} }), 'error')
+    assert.equal(paymentErrorMessage({}), undefined)
   })
 })
