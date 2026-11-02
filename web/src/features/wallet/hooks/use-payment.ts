@@ -57,11 +57,26 @@ const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
   waffoPancake: calculateWaffoPancakeAmount,
 }
 
-export async function requestPaymentAmount(
+/** What the server quoted: money to pay and, when there is one, the bonus. */
+export interface PaymentQuote {
+  money: number
+  bonusRate: number
+  bonusAmount: number
+  creditAmount: number
+}
+
+const emptyPaymentQuote: PaymentQuote = {
+  money: 0,
+  bonusRate: 0,
+  bonusAmount: 0,
+  creditAmount: 0,
+}
+
+export async function requestPaymentQuote(
   topupAmount: number,
   paymentType: string,
   calculators: PaymentAmountCalculators = defaultPaymentAmountCalculators
-): Promise<number> {
+): Promise<PaymentQuote> {
   let calculator = calculators.regular
   if (isStripePayment(paymentType)) {
     calculator = calculators.stripe
@@ -73,14 +88,28 @@ export async function requestPaymentAmount(
 
   const response = await calculator({ amount: topupAmount })
   if (!isApiSuccess(response) || !response.data) {
-    return 0
+    return emptyPaymentQuote
   }
 
-  return Number.parseFloat(response.data)
+  return {
+    money: Number.parseFloat(response.data),
+    bonusRate: response.bonus_rate ?? 0,
+    bonusAmount: response.bonus_amount ?? 0,
+    creditAmount: response.credit_amount ?? 0,
+  }
+}
+
+export async function requestPaymentAmount(
+  topupAmount: number,
+  paymentType: string,
+  calculators: PaymentAmountCalculators = defaultPaymentAmountCalculators
+): Promise<number> {
+  const quote = await requestPaymentQuote(topupAmount, paymentType, calculators)
+  return quote.money
 }
 
 export function usePayment() {
-  const [amount, setAmount] = useState<number>(0)
+  const [quote, setQuote] = useState<PaymentQuote>(emptyPaymentQuote)
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
 
@@ -89,14 +118,11 @@ export function usePayment() {
     async (topupAmount: number, paymentType: string) => {
       try {
         setCalculating(true)
-        const calculatedAmount = await requestPaymentAmount(
-          topupAmount,
-          paymentType
-        )
-        setAmount(calculatedAmount)
-        return calculatedAmount
+        const calculated = await requestPaymentQuote(topupAmount, paymentType)
+        setQuote(calculated)
+        return calculated.money
       } catch {
-        setAmount(0)
+        setQuote(emptyPaymentQuote)
         return 0
       } finally {
         setCalculating(false)
@@ -157,8 +183,15 @@ export function usePayment() {
     []
   )
 
+  const setAmount = useCallback((money: number) => {
+    setQuote({ ...emptyPaymentQuote, money })
+  }, [])
+
   return {
-    amount,
+    amount: quote.money,
+    bonusRate: quote.bonusRate,
+    bonusAmount: quote.bonusAmount,
+    creditAmount: quote.creditAmount,
     calculating,
     processing,
     calculatePaymentAmount,

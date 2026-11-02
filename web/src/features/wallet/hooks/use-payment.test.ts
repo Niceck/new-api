@@ -20,7 +20,8 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { PAYMENT_TYPES } from '../constants'
-import { requestPaymentAmount } from './use-payment'
+import type { AmountResponse } from '../types'
+import { requestPaymentAmount, requestPaymentQuote } from './use-payment'
 
 describe('payment amount routing', () => {
   test('uses the dedicated Waffo amount calculator', async () => {
@@ -46,5 +47,63 @@ describe('payment amount routing', () => {
 
     assert.equal(amount, 18.75)
     assert.deepEqual(calls, ['waffo:120'])
+  })
+})
+
+describe('payment quote', () => {
+  const calculators = (response: AmountResponse) => {
+    const reply = async () => response
+    return { regular: reply, stripe: reply, waffo: reply, waffoPancake: reply }
+  }
+
+  test('carries the bonus the server quoted', async () => {
+    const quote = await requestPaymentQuote(
+      500,
+      'alipay',
+      calculators({
+        success: true,
+        data: '500.00',
+        bonus_rate: 0.035,
+        bonus_amount: 17.5,
+        credit_amount: 517.5,
+      })
+    )
+    assert.deepEqual(quote, {
+      money: 500,
+      bonusRate: 0.035,
+      bonusAmount: 17.5,
+      creditAmount: 517.5,
+    })
+  })
+
+  test('no bonus fields means no bonus', async () => {
+    const quote = await requestPaymentQuote(
+      100,
+      'alipay',
+      calculators({ success: true, data: '100.00' })
+    )
+    assert.deepEqual(quote, {
+      money: 100,
+      bonusRate: 0,
+      bonusAmount: 0,
+      creditAmount: 0,
+    })
+  })
+
+  test('a failed quote is all zeros, so no 0-yuan dialog opens', async () => {
+    const quote = await requestPaymentQuote(
+      100,
+      'alipay',
+      calculators({ success: false, data: '', message: 'error' })
+    )
+    assert.equal(quote.money, 0)
+    assert.equal(
+      await requestPaymentAmount(
+        100,
+        'alipay',
+        calculators({ success: true, data: '100.00' })
+      ),
+      100
+    )
   })
 })

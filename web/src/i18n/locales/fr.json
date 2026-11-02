@@ -5390,6 +5390,20 @@
     "Highest level reached": "Niveau maximal atteint",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "La remise de niveau s'applique à chaque recharge ; si une remise par montant est plus avantageuse, c'est elle qui s'applique, sans cumul",
     "Progress to VIP{{level}}": "Progression vers VIP{{level}}",
-    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Le niveau membre est momentanément indisponible ; le montant à payer reste calculé par le serveur"
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Le niveau membre est momentanément indisponible ; le montant à payer reste calculé par le serveur",
+    "+{{percent}}% credit": "+{{percent}} % de crédit",
+    "Get {{amount}}": "Reçu {{amount}}",
+    "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total": "Bonus {{amount}} ({{percent}} %), {{credited}} crédités au total",
+    "Bonus credit": "Crédit bonus",
+    "Total credited": "Total crédité",
+    "Every top-up gets {{percent}}% extra credit": "Chaque recharge donne {{percent}} % de crédit en plus",
+    "Top up {{amount}} in total to unlock permanent bonus credit": "Rechargez {{amount}} au total pour obtenir un bonus permanent",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)": "Encore {{amount}} pour atteindre VIP{{level}} ({{percent}} % de crédit en plus)",
+    "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead": "Le bonus de niveau s'applique à chaque recharge ; si le bonus de la recharge est plus élevé, c'est lui qui s'applique, sans cumul",
+    "Includes {{amount}} bonus credit": "Dont {{amount}} de bonus",
+    "Credited in full: {{amount}}": "Crédité si paiement complet : {{amount}}",
+    "Bonus by top-up amount: {{ranges}}": "Bonus selon le montant : {{ranges}}",
+    "{{from}}–{{to}} +{{percent}}%": "{{from}}–{{to}} : +{{percent}} %",
+    "{{from}} and above +{{percent}}%": "{{from}} et plus : +{{percent}} %"
   }
 }

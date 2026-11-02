@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { formatCurrencyFromUSD } from '@/lib/currency'
+import { formatCurrencyFromUSD, formatQuotaWithCurrency } from '@/lib/currency'
 import { formatNumber } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -277,6 +277,16 @@ export function BillingHistoryDialog({
                                   ),
                                 }
                               )}
+                            </div>
+                          ) : null}
+                          {tronCreditedAmount(record) == null &&
+                          (record.bonus_quota ?? 0) > 0 ? (
+                            <div className='text-xs text-green-600'>
+                              {t('Includes {{amount}} bonus credit', {
+                                amount: formatQuotaWithCurrency(
+                                  record.bonus_quota ?? 0
+                                ),
+                              })}
                             </div>
                           ) : null}
                         </div>

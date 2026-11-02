@@ -97,6 +97,9 @@ export function Wallet(props: WalletProps) {
   }, [currency?.quotaDisplayType, currency?.usdExchangeRate])
   const {
     amount: paymentAmount,
+    bonusRate: paymentBonusRate,
+    bonusAmount: paymentBonusAmount,
+    creditAmount: paymentCreditAmount,
     calculating,
     processing,
     calculatePaymentAmount,
@@ -324,6 +327,9 @@ export function Wallet(props: WalletProps) {
                   topupAmount={topupAmount}
                   onTopupAmountChange={handleTopupAmountChange}
                   paymentAmount={paymentAmount}
+                  paymentBonusRate={paymentBonusRate}
+                  paymentBonusAmount={paymentBonusAmount}
+                  paymentCreditAmount={paymentCreditAmount}
                   calculating={calculating}
                   onPaymentMethodSelect={handlePaymentMethodSelect}
                   paymentLoading={paymentLoading}
@@ -372,6 +378,9 @@ export function Wallet(props: WalletProps) {
         calculating={calculating}
         processing={processing || waffoProcessing || pancakeProcessing}
         discountRate={getDiscountRate()}
+        bonusRate={paymentBonusRate}
+        bonusAmount={paymentBonusAmount}
+        creditAmount={paymentCreditAmount}
         usdExchangeRate={effectiveUsdExchangeRate}
       />
 

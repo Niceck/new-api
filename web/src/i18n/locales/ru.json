@@ -5390,6 +5390,20 @@
     "Highest level reached": "Достигнут высший уровень",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Скидка уровня действует на каждое пополнение; если скидка за сумму выгоднее, применяется она, без суммирования",
     "Progress to VIP{{level}}": "Прогресс до VIP{{level}}",
-    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Уровень участника временно недоступен; сумма к оплате по-прежнему рассчитывается сервером"
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Уровень участника временно недоступен; сумма к оплате по-прежнему рассчитывается сервером",
+    "+{{percent}}% credit": "+{{percent}}% бонус",
+    "Get {{amount}}": "Зачисление {{amount}}",
+    "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total": "Бонус {{amount}} ({{percent}}%), всего будет зачислено {{credited}}",
+    "Bonus credit": "Бонус",
+    "Total credited": "Всего будет зачислено",
+    "Every top-up gets {{percent}}% extra credit": "Каждое пополнение даёт на {{percent}}% больше",
+    "Top up {{amount}} in total to unlock permanent bonus credit": "Пополните всего на {{amount}}, чтобы получать постоянный бонус",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)": "Ещё {{amount}} до VIP{{level}} (на {{percent}}% больше)",
+    "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead": "Бонус уровня действует на каждое пополнение; если бонус за сумму выше, применяется он, без суммирования",
+    "Includes {{amount}} bonus credit": "Включая бонус {{amount}}",
+    "Credited in full: {{amount}}": "Зачисление при полной оплате: {{amount}}",
+    "Bonus by top-up amount: {{ranges}}": "Бонус по сумме: {{ranges}}",
+    "{{from}}–{{to}} +{{percent}}%": "{{from}}–{{to}}: +{{percent}}%",
+    "{{from}} and above +{{percent}}%": "от {{from}}: +{{percent}}%"
   }
 }

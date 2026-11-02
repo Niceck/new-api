@@ -20,7 +20,15 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { TopupTierStatus } from '../../types'
-import { effectiveDiscount, parseTopupTier, tierProgress } from '../tier'
+import {
+  bonusPercent,
+  bonusRanges,
+  effectiveBonus,
+  effectiveDiscount,
+  isBonusTier,
+  parseTopupTier,
+  tierProgress,
+} from '../tier'
 
 const ladder = [
   { level: 1, threshold: 1000, discount: 0.98 },
@@ -130,5 +138,104 @@ describe('tierProgress', () => {
       }),
       100
     )
+  })
+})
+
+describe('bonus mode', () => {
+  const amountBonus = { 200: 0.025, 500: 0.035, 1000: 0.055, 2000: 0.09 }
+  const bonusLadder = [
+    { level: 1, threshold: 1000, discount: 1, bonus: 0.025 },
+    { level: 2, threshold: 2500, discount: 1, bonus: 0.035 },
+    { level: 3, threshold: 5000, discount: 1, bonus: 0.055 },
+    { level: 4, threshold: 10000, discount: 1, bonus: 0.09 },
+  ]
+  const bonusVip2: TopupTierStatus = {
+    total: 3000,
+    level: 2,
+    discount: 1,
+    bonus: 0.035,
+    threshold: 2500,
+    next_level: 3,
+    next_threshold: 5000,
+    next_discount: 1,
+    next_bonus: 0.055,
+    remaining: 2000,
+    tiers: bonusLadder,
+  }
+
+  test('parseTopupTier keeps the bonus fields and the ladder rates', () => {
+    const parsed = parseTopupTier(bonusVip2)
+    assert.ok(parsed)
+    assert.equal(parsed.bonus, 0.035)
+    assert.equal(parsed.next_bonus, 0.055)
+    assert.equal(parsed.tiers[3]?.bonus, 0.09)
+  })
+
+  test('a discount ladder stays a discount ladder', () => {
+    const parsed = parseTopupTier(vip2)
+    assert.ok(parsed)
+    assert.equal(parsed.bonus, undefined)
+    assert.equal(isBonusTier(parsed), false)
+    assert.equal(isBonusTier(bonusVip2), true)
+    assert.equal(
+      isBonusTier({
+        total: 0,
+        level: 0,
+        discount: 1,
+        tiers: bonusLadder,
+        next_level: 1,
+      }),
+      true,
+      'below the first level the ladder still says which mode it is'
+    )
+  })
+
+  test('single-order rate is reached by threshold, not by an exact match', () => {
+    assert.equal(effectiveBonus(199, amountBonus, null), 0)
+    assert.equal(effectiveBonus(200, amountBonus, null), 0.025)
+    assert.equal(effectiveBonus(600, amountBonus, null), 0.035)
+    assert.equal(effectiveBonus(1999, amountBonus, null), 0.055)
+    assert.equal(effectiveBonus(4000, amountBonus, null), 0.09)
+  })
+
+  test('takes the higher of single-order and tier, never the sum', () => {
+    assert.equal(effectiveBonus(10, amountBonus, bonusVip2), 0.035)
+    assert.equal(effectiveBonus(500, amountBonus, bonusVip2), 0.035)
+    assert.equal(effectiveBonus(2000, amountBonus, bonusVip2), 0.09)
+  })
+
+  test('no bonus at all when the mode is off', () => {
+    assert.equal(effectiveBonus(2000, {}, null), 0)
+    assert.equal(effectiveBonus(2000, undefined, vip2), 0)
+    assert.equal(
+      effectiveBonus(10, {}, { ...bonusVip2, level: 0, bonus: undefined }),
+      0
+    )
+  })
+
+  test('bonusPercent has no float noise', () => {
+    assert.equal(bonusPercent(0.035), 3.5)
+    assert.equal(bonusPercent(0.055), 5.5)
+    assert.equal(bonusPercent(0.09), 9)
+    assert.equal(bonusPercent(0.0333), 3.33)
+  })
+})
+
+describe('bonusRanges', () => {
+  test('turns thresholds into brackets, the last one open-ended', () => {
+    assert.deepEqual(
+      bonusRanges({ 2000: 0.09, 200: 0.025, 1000: 0.055, 500: 0.035 }),
+      [
+        { from: 200, to: 499, rate: 0.025 },
+        { from: 500, to: 999, rate: 0.035 },
+        { from: 1000, to: 1999, rate: 0.055 },
+        { from: 2000, rate: 0.09 },
+      ]
+    )
+  })
+
+  test('nothing configured means no brackets', () => {
+    assert.deepEqual(bonusRanges({}), [])
+    assert.deepEqual(bonusRanges(undefined), [])
   })
 })

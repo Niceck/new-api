@@ -85,3 +85,44 @@ describe('hasTronTolerance', () => {
     assert.equal(hasTronTolerance({ tolerant_match: true }), false)
   })
 })
+
+describe('tronCreditedAmount with a bonus', () => {
+  test('a fully credited order shows face value plus bonus', () => {
+    assert.equal(
+      tronCreditedAmount({
+        amount: 100,
+        bonus_quota: 1_750_000,
+        tron_received_usdt_micros: 15_000_000,
+        tron_credited_quota: 51_750_000,
+        tron_face_quota: 51_750_000,
+      }),
+      103.5
+    )
+  })
+
+  test('a partial payment scales the bonus with it', () => {
+    assert.equal(
+      tronCreditedAmount({
+        amount: 100,
+        bonus_quota: 1_750_000,
+        tron_received_usdt_micros: 14_250_000,
+        tron_credited_quota: 49_162_500,
+        tron_face_quota: 51_750_000,
+      }),
+      98.325
+    )
+  })
+
+  test('a bonus that eats the whole order shows nothing rather than Infinity', () => {
+    assert.equal(
+      tronCreditedAmount({
+        amount: 100,
+        bonus_quota: 50_000_000,
+        tron_received_usdt_micros: 15_000_000,
+        tron_credited_quota: 50_000_000,
+        tron_face_quota: 50_000_000,
+      }),
+      null
+    )
+  })
+})

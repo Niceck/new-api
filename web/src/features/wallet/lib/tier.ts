@@ -42,7 +42,10 @@ function parseTierLevel(item: unknown): TopupTierLevel | null {
   if (level === null || threshold === null || discount === null) {
     return null
   }
-  return { level, threshold, discount }
+  const bonus = finiteNumber(raw.bonus)
+  return bonus === null
+    ? { level, threshold, discount }
+    : { level, threshold, discount, bonus }
 }
 
 /**
@@ -79,6 +82,11 @@ export function parseTopupTier(data: unknown): TopupTierStatus | null {
     next_discount: optional('next_discount'),
     remaining: optional('remaining'),
     tiers,
+    // Bonus fields only exist in bonus mode; a discount ladder keeps its old shape
+    ...(optional('bonus') !== undefined ? { bonus: optional('bonus') } : {}),
+    ...(optional('next_bonus') !== undefined
+      ? { next_bonus: optional('next_bonus') }
+      : {}),
   }
 }
 
@@ -95,6 +103,58 @@ export function effectiveDiscount(
   const tierRate =
     tier && tier.level > 0 && tier.discount > 0 ? tier.discount : 1
   return Math.min(base, tierRate)
+}
+
+/**
+ * The bonus rate a top-up really gets: the higher of the single-order rate
+ * this amount reaches and the member tier's. They are never added together.
+ * 0 when bonus mode is off. The server snapshots the real figure on the order;
+ * this only drives what the wallet previews.
+ */
+export function effectiveBonus(
+  amount: number,
+  amountBonus: Record<number, number> | undefined,
+  tier: TopupTierStatus | null | undefined
+): number {
+  let rate = 0
+  for (const [threshold, value] of Object.entries(amountBonus ?? {})) {
+    if (amount >= Number(threshold) && value > rate) {
+      rate = value
+    }
+  }
+  const tierRate = tier && tier.level > 0 ? (tier.bonus ?? 0) : 0
+  return Math.max(rate, tierRate)
+}
+
+/**
+ * The single-order bonus as the brackets customers read: any amount inside a
+ * bracket gets its rate, on that actual amount. The last bracket has no upper end.
+ */
+export function bonusRanges(
+  amountBonus: Record<number, number> | undefined
+): { from: number; to?: number; rate: number }[] {
+  const steps = Object.entries(amountBonus ?? {})
+    .map(([threshold, rate]) => ({ from: Number(threshold), rate }))
+    .filter((step) => Number.isFinite(step.from) && step.rate > 0)
+    .sort((a, b) => a.from - b.from)
+  return steps.map((step, index) => {
+    const next = steps[index + 1]
+    return next ? { ...step, to: next.from - 1 } : step
+  })
+}
+
+/** A bonus rate as the percentage people read: 0.035 → 3.5, without float noise. */
+export function bonusPercent(rate: number): number {
+  return Number((rate * 100).toFixed(2))
+}
+
+/** Whether this ladder gives bonus credit rather than a discount. */
+export function isBonusTier(tier: TopupTierStatus): boolean {
+  return (
+    (tier.bonus ?? 0) > 0 ||
+    (tier.next_bonus ?? 0) > 0 ||
+    tier.tiers.some((level) => (level.bonus ?? 0) > 0)
+  )
 }
 
 /**

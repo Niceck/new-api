@@ -478,3 +478,167 @@ describe('RechargeFormCard member tier', () => {
     container.remove()
   })
 })
+
+describe('RechargeFormCard bonus mode', () => {
+  const amounts = [100, 200, 500, 1000, 2000]
+  const bonus = { 200: 0.025, 500: 0.035, 1000: 0.055, 2000: 0.09 }
+  const ladder = [
+    { level: 1, threshold: 1000, discount: 1, bonus: 0.025 },
+    { level: 2, threshold: 2500, discount: 1, bonus: 0.035 },
+    { level: 3, threshold: 5000, discount: 1, bonus: 0.055 },
+    { level: 4, threshold: 10000, discount: 1, bonus: 0.09 },
+  ]
+  const vip2: TopupTierStatus = {
+    total: 3000,
+    level: 2,
+    discount: 1,
+    bonus: 0.035,
+    threshold: 2500,
+    next_level: 3,
+    next_threshold: 5000,
+    next_discount: 1,
+    next_bonus: 0.055,
+    remaining: 2000,
+    tiers: ladder,
+  }
+  const newcomer: TopupTierStatus = {
+    total: 300,
+    level: 0,
+    discount: 1,
+    next_level: 1,
+    next_threshold: 1000,
+    next_discount: 1,
+    next_bonus: 0.025,
+    remaining: 700,
+    tiers: ladder,
+  }
+
+  async function renderBonus(
+    instance: typeof i18n,
+    tier: TopupTierStatus | null,
+    quote: { rate: number; amount: number; credit: number } = {
+      rate: 0,
+      amount: 0,
+      credit: 0,
+    }
+  ): Promise<{
+    banner: string
+    cards: string[]
+    quoteLine: string | null
+    ranges: string | null
+  }> {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={instance}>
+          <RechargeFormCard
+            topupInfo={{
+              ...topupInfo,
+              amount_options: amounts,
+              discount: {},
+              bonus,
+              tier,
+            }}
+            presetAmounts={amounts.map((value) => ({ value }))}
+            selectedPreset={null}
+            onSelectPreset={() => undefined}
+            topupAmount={600}
+            onTopupAmountChange={() => undefined}
+            paymentAmount={600}
+            paymentBonusRate={quote.rate}
+            paymentBonusAmount={quote.amount}
+            paymentCreditAmount={quote.credit}
+            calculating={false}
+            onPaymentMethodSelect={() => undefined}
+            paymentLoading={null}
+            redemptionCode=''
+            onRedemptionCodeChange={() => undefined}
+            onRedeem={() => undefined}
+            redeeming={false}
+          />
+        </I18nextProvider>
+      )
+    })
+    const text = (node: Element | null) =>
+      (node?.textContent ?? '').replaceAll(/\s+/g, ' ').trim()
+    const banner = text(container.querySelector('[data-testid="topup-tier"]'))
+    const quoteNode = container.querySelector(
+      '[data-testid="topup-bonus-quote"]'
+    )
+    const rangesNode = container.querySelector(
+      '[data-testid="topup-bonus-ranges"]'
+    )
+    const cards = [...container.querySelectorAll('button')]
+      .filter((button) => button.className.includes('min-h-16'))
+      .map((button) => text(button))
+    await act(async () => root.unmount())
+    container.remove()
+    return {
+      banner,
+      cards,
+      quoteLine: quoteNode ? text(quoteNode) : null,
+      ranges: rangesNode ? text(rangesNode) : null,
+    }
+  }
+
+  test('newcomer: cards show the price and what lands in the wallet', async () => {
+    const { cards } = await renderBonus(i18nZh, newcomer)
+    assert.equal(cards[0], '100实付 100', 'below the threshold: no badge')
+    assert.equal(cards[1], '200送 2.5%实付 200 • 到账 205')
+    assert.equal(cards[2], '500送 3.5%实付 500 • 到账 517.5')
+    assert.equal(cards[3], '1,000送 5.5%实付 1,000 • 到账 1,055')
+    assert.equal(cards[4], '2,000送 9%实付 2,000 • 到账 2,180')
+  })
+
+  test('member: the tier lifts small amounts, a higher single-order rate still wins', async () => {
+    const { cards } = await renderBonus(i18nZh, vip2)
+    assert.equal(cards[0], '100送 3.5%实付 100 • 到账 103.5')
+    assert.equal(cards[1], '200送 3.5%实付 200 • 到账 207')
+    assert.equal(cards[2], '500送 3.5%实付 500 • 到账 517.5', 'not 7%')
+    assert.equal(cards[4], '2,000送 9%实付 2,000 • 到账 2,180')
+  })
+
+  test('Chinese banner says bonus, not discount', async () => {
+    const { banner } = await renderBonus(i18nZh, vip2)
+    assert.match(banner, /VIP2/)
+    assert.match(banner, /每笔充值多送 3\.5% 额度/)
+    assert.match(banner, /累计充值 3,000/)
+    assert.match(banner, /再充 2,000 升级 VIP3（多送 5\.5%）/)
+    assert.match(banner, /不叠加/)
+    assert.doesNotMatch(banner, /折|OFF|Top up|extra credit/)
+  })
+
+  test('below the first level the banner invites with the bonus', async () => {
+    const { banner } = await renderBonus(i18nZh, newcomer)
+    assert.match(banner, /累计充值满 1,000 起每笔多送额度/)
+    assert.match(banner, /再充 700 升级 VIP1（多送 2\.5%）/)
+    assert.doesNotMatch(banner, /折/)
+  })
+
+  test('the custom amount line uses the figures the server quoted', async () => {
+    const none = await renderBonus(i18nZh, newcomer)
+    assert.equal(none.quoteLine, null)
+    const quoted = await renderBonus(i18nZh, newcomer, {
+      rate: 0.035,
+      amount: 21,
+      credit: 621,
+    })
+    assert.equal(quoted.quoteLine, '赠送 21（3.5%），合计到账 621')
+  })
+
+  test('lists the brackets so any amount inside one is clearly covered', async () => {
+    const { ranges } = await renderBonus(i18nZh, newcomer)
+    assert.equal(
+      ranges,
+      '单笔赠送：200–499 送 2.5% · 500–999 送 3.5% · 1,000–1,999 送 5.5% · 2,000 及以上送 9%'
+    )
+  })
+
+  test('English wording', async () => {
+    const { cards, banner } = await renderBonus(i18n, vip2)
+    assert.equal(cards[1], '200+3.5% creditPay 200 • Get 207')
+    assert.match(banner, /Every top-up gets 3\.5% extra credit/)
+  })
+})

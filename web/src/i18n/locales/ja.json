@@ -5390,6 +5390,20 @@
     "Highest level reached": "最高ランクに到達",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "ランク割引は毎回のチャージに適用されます。単回の割引の方が有利な場合はそちらが適用され、併用はされません",
     "Progress to VIP{{level}}": "VIP{{level}} までの進捗",
-    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "会員ランク情報を一時的に取得できません。お支払い金額はサーバー側で計算されます"
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "会員ランク情報を一時的に取得できません。お支払い金額はサーバー側で計算されます",
+    "+{{percent}}% credit": "{{percent}}% 増量",
+    "Get {{amount}}": "入金 {{amount}}",
+    "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total": "ボーナス {{amount}}（{{percent}}%）、合計 {{credited}} を入金",
+    "Bonus credit": "ボーナス",
+    "Total credited": "合計入金額",
+    "Every top-up gets {{percent}}% extra credit": "毎回のチャージで {{percent}}% 増量",
+    "Top up {{amount}} in total to unlock permanent bonus credit": "累計 {{amount}} のチャージで毎回増量",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)": "あと {{amount}} で VIP{{level}}（{{percent}}% 増量）",
+    "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead": "ランク特典は毎回のチャージに適用されます。1 回分の特典の方が高い場合はそちらが適用され、併用はできません",
+    "Includes {{amount}} bonus credit": "ボーナス {{amount}} を含む",
+    "Credited in full: {{amount}}": "全額入金時の入金額 {{amount}}",
+    "Bonus by top-up amount: {{ranges}}": "チャージ額別ボーナス：{{ranges}}",
+    "{{from}}–{{to}} +{{percent}}%": "{{from}}〜{{to}} は {{percent}}% 増量",
+    "{{from}} and above +{{percent}}%": "{{from}} 以上は {{percent}}% 増量"
   }
 }

@@ -189,6 +189,7 @@ export function useTopupInfo() {
         ),
         amount_options: parseAmountOptions(response.data.amount_options),
         discount: parseDiscountMap(response.data.discount),
+        bonus: parseDiscountMap(response.data.bonus),
         tier: parseTopupTier(response.data.tier),
         tier_unavailable: response.data.tier_unavailable === true,
         creem_products: parseCreemProducts(response.data.creem_products),

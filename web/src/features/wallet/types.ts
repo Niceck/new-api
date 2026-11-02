@@ -34,7 +34,14 @@ export interface ApiResponse<T = unknown> {
  */
 export type TopupInfoResponse = ApiResponse<TopupInfo>
 export type RedemptionResponse = ApiResponse<number>
-export type AmountResponse = ApiResponse<string>
+export type AmountResponse = ApiResponse<string> & {
+  /** Bonus rate of this quote; absent when the top-up earns no bonus */
+  bonus_rate?: number
+  /** Bonus credit of this quote, in top-up units */
+  bonus_amount?: number
+  /** Face value plus bonus, in top-up units */
+  credit_amount?: number
+}
 export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string
 }
@@ -162,8 +169,10 @@ export interface TopupTierLevel {
   level: number
   /** Cumulative face value needed, in top-up units */
   threshold: number
-  /** Rate paid on every top-up once reached (0.92 = 8% off) */
+  /** Rate paid on every top-up once reached (0.92 = 8% off); 1 in bonus mode */
   discount: number
+  /** Extra credit on every top-up once reached (0.09 = 9% more); bonus mode only */
+  bonus?: number
 }
 
 /**
@@ -176,11 +185,14 @@ export interface TopupTierStatus {
   level: number
   /** Rate paid at the current level, 1 below the first threshold */
   discount: number
+  /** Extra credit at the current level; bonus mode only, absent below the first threshold */
+  bonus?: number
   /** Threshold of the current level */
   threshold?: number
   next_level?: number
   next_threshold?: number
   next_discount?: number
+  next_bonus?: number
   /** Face value still needed to reach the next level */
   remaining?: number
   /** The whole ladder */
@@ -205,6 +217,8 @@ export interface TopupInfo {
   amount_options: number[]
   /** Discount rates by amount */
   discount: Record<number, number>
+  /** Bonus rates by the single-order amount that reaches them; empty unless bonus mode is on */
+  bonus?: Record<number, number>
   /** Cumulative top-up tier of the current user; null when tiers are not configured */
   tier?: TopupTierStatus | null
   /** Tiers are configured but the user's total could not be read right now */
@@ -340,6 +354,8 @@ export interface TopupRecord {
   amount: number
   /** Payment amount (actual money paid) */
   money: number
+  /** Bonus credit promised by this order when it was created, in quota */
+  bonus_quota?: number
   /** Trade/order number */
   trade_no: string
   /** Payment method type */

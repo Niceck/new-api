@@ -21,7 +21,13 @@ import { useTranslation } from 'react-i18next'
 
 import { Progress } from '@/components/ui/progress'
 
-import { formatCurrency, getDiscountParts, tierProgress } from '../lib'
+import {
+  bonusPercent,
+  formatCurrency,
+  getDiscountParts,
+  isBonusTier,
+  tierProgress,
+} from '../lib'
 import type { TopupTierStatus } from '../types'
 
 interface TopupTierBannerProps {
@@ -54,13 +60,50 @@ export function TopupTierBanner({
       ? Math.max(tier.next_threshold - tier.total, 0)
       : 0)
 
+  const bonusMode = isBonusTier(tier)
+
   let headline = t('Member level')
-  if (tier.level > 0 && current) {
+  if (bonusMode && tier.level > 0 && tier.bonus) {
+    headline = t('Every top-up gets {{percent}}% extra credit', {
+      percent: bonusPercent(tier.bonus),
+    })
+  } else if (bonusMode && tier.level === 0) {
+    headline = t(
+      'Top up {{amount}} in total to unlock permanent bonus credit',
+      {
+        amount: display(firstThreshold),
+      }
+    )
+  } else if (tier.level > 0 && current) {
     headline = t('Every top-up at {{percent}}% off', current)
   } else if (tier.level === 0) {
     headline = t('Top up {{amount}} in total to unlock a permanent discount', {
       amount: display(firstThreshold),
     })
+  }
+
+  let nextLine = t('Top up {{amount}} more to reach VIP{{level}}', {
+    amount: display(remaining),
+    level: tier.next_level,
+  })
+  if (bonusMode && tier.next_bonus) {
+    nextLine = t(
+      'Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)',
+      {
+        amount: display(remaining),
+        level: tier.next_level,
+        percent: bonusPercent(tier.next_bonus),
+      }
+    )
+  } else if (!bonusMode && next) {
+    nextLine = t(
+      'Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)',
+      {
+        amount: display(remaining),
+        level: tier.next_level,
+        ...next,
+      }
+    )
   }
 
   return (
@@ -86,21 +129,7 @@ export function TopupTierBanner({
               level: tier.next_level,
             })}
           />
-          <p className='text-muted-foreground text-xs'>
-            {next
-              ? t(
-                  'Top up {{amount}} more to reach VIP{{level}} ({{percent}}% off)',
-                  {
-                    amount: display(remaining),
-                    level: tier.next_level,
-                    ...next,
-                  }
-                )
-              : t('Top up {{amount}} more to reach VIP{{level}}', {
-                  amount: display(remaining),
-                  level: tier.next_level,
-                })}
-          </p>
+          <p className='text-muted-foreground text-xs'>{nextLine}</p>
         </div>
       ) : (
         <p className='text-muted-foreground text-xs'>
@@ -108,9 +137,13 @@ export function TopupTierBanner({
         </p>
       )}
       <p className='text-muted-foreground text-[11px] leading-4'>
-        {t(
-          'Your level discount applies to every top-up; when a single-order discount is better, you get that one instead'
-        )}
+        {bonusMode
+          ? t(
+              'Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead'
+            )
+          : t(
+              'Your level discount applies to every top-up; when a single-order discount is better, you get that one instead'
+            )}
       </p>
     </div>
   )

@@ -32,6 +32,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { formatQuotaWithCurrency } from '@/lib/currency'
 
 import {
   formatTronCNYValue,
@@ -280,6 +281,14 @@ export function TronPaymentDialog(props: TronPaymentDialogProps) {
                   {t('Copy')}
                 </Button>
               </div>
+              <p
+                data-testid='tron-order-credit'
+                className='mt-2 text-sm font-medium'
+              >
+                {t('Credited in full: {{amount}}', {
+                  amount: formatQuotaWithCurrency(props.order.credit_quota),
+                })}
+              </p>
               {tolerant ? (
                 <TronToleranceRules order={props.order} />
               ) : (

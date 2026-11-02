@@ -33,7 +33,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
 
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
-import { formatCurrency, getPaymentIcon } from '../../lib'
+import { bonusPercent, formatCurrency, getPaymentIcon } from '../../lib'
 import type { PaymentMethod } from '../../types'
 
 interface PaymentConfirmDialogProps {
@@ -46,6 +46,10 @@ interface PaymentConfirmDialogProps {
   calculating: boolean
   processing: boolean
   discountRate?: number
+  /** Bonus quoted by the server for this amount; 0 when there is none */
+  bonusRate?: number
+  bonusAmount?: number
+  creditAmount?: number
   usdExchangeRate?: number
 }
 
@@ -59,9 +63,19 @@ export function PaymentConfirmDialog({
   calculating,
   processing,
   discountRate = DEFAULT_DISCOUNT_RATE,
+  bonusRate = 0,
+  bonusAmount = 0,
+  creditAmount = 0,
   usdExchangeRate = 1,
 }: PaymentConfirmDialogProps) {
   const { t } = useTranslation()
+  const hasBonus = bonusAmount > 0 && creditAmount > 0
+  const formatUnits = (units: number) =>
+    formatLocalCurrencyAmount(units * usdExchangeRate, {
+      digitsLarge: 2,
+      digitsSmall: 2,
+      abbreviate: false,
+    })
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
   const originalAmount = hasDiscount ? paymentAmount / discountRate : 0
   const discountAmount = hasDiscount ? originalAmount - paymentAmount : 0
@@ -91,6 +105,30 @@ export function PaymentConfirmDialog({
               })}
             </span>
           </div>
+
+          {hasBonus && !calculating && (
+            <div
+              data-testid='payment-confirm-bonus'
+              className='bg-muted/50 space-y-2 rounded-lg p-3 text-sm'
+            >
+              <div className='flex items-center justify-between'>
+                <span className='text-muted-foreground'>
+                  {t('Bonus credit')}
+                </span>
+                <span className='font-semibold text-green-600'>
+                  +{formatUnits(bonusAmount)} ({bonusPercent(bonusRate)}%)
+                </span>
+              </div>
+              <div className='flex items-center justify-between'>
+                <span className='text-muted-foreground'>
+                  {t('Total credited')}
+                </span>
+                <span className='font-semibold'>
+                  {formatUnits(creditAmount)}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className='flex items-center justify-between'>
             <span className='text-muted-foreground text-sm'>

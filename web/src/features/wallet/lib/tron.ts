@@ -65,6 +65,7 @@ export function formatTronCNYValue(
  */
 export function tronCreditedAmount(record: {
   amount: number
+  bonus_quota?: number
   tron_received_usdt_micros?: number
   tron_credited_quota?: number
   tron_face_quota?: number
@@ -78,7 +79,13 @@ export function tronCreditedAmount(record: {
   ) {
     return null
   }
-  return (record.amount * credited) / face
+  // tron_face_quota is the order's full credit, bonus included, while amount is
+  // the face value only: scale by the face part so the bonus is not lost here.
+  const faceWithoutBonus = face - (record.bonus_quota ?? 0)
+  if (faceWithoutBonus <= 0) {
+    return null
+  }
+  return (record.amount * credited) / faceWithoutBonus
 }
 
 /** Whether a TRON order advertises an automatic range for inexact amounts. */

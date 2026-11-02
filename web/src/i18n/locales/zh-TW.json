@@ -5389,6 +5389,20 @@
     "Highest level reached": "已是最高等級",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "等級折扣適用於每一筆儲值；單筆檔位優惠更划算時按單筆計算，兩者不疊加",
     "Progress to VIP{{level}}": "距離 VIP{{level}} 的進度",
-    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "會員等級資訊暫時讀取不到；應付金額仍由伺服器按規則計算"
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "會員等級資訊暫時讀取不到；應付金額仍由伺服器按規則計算",
+    "+{{percent}}% credit": "送 {{percent}}%",
+    "Get {{amount}}": "到帳 {{amount}}",
+    "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total": "贈送 {{amount}}（{{percent}}%），合計到帳 {{credited}}",
+    "Bonus credit": "贈送額度",
+    "Total credited": "實際到帳",
+    "Every top-up gets {{percent}}% extra credit": "每筆儲值多送 {{percent}}% 額度",
+    "Top up {{amount}} in total to unlock permanent bonus credit": "累計儲值滿 {{amount}} 起每筆多送額度",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)": "再儲 {{amount}} 升級 VIP{{level}}（多送 {{percent}}%）",
+    "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead": "等級贈送對每筆儲值生效；單筆贈送更高時按單筆，不疊加",
+    "Includes {{amount}} bonus credit": "含贈送 {{amount}}",
+    "Credited in full: {{amount}}": "全額到帳 {{amount}}",
+    "Bonus by top-up amount: {{ranges}}": "單筆贈送：{{ranges}}",
+    "{{from}}–{{to}} +{{percent}}%": "{{from}}–{{to}} 送 {{percent}}%",
+    "{{from}} and above +{{percent}}%": "{{from}} 及以上送 {{percent}}%"
   }
 }

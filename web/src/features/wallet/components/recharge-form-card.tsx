@@ -39,11 +39,14 @@ import { cn } from '@/lib/utils'
 
 import { PAYMENT_TYPES } from '../constants'
 import {
+  bonusPercent,
+  bonusRanges,
   formatCurrency,
   getDiscountParts,
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
+  effectiveBonus,
   effectiveDiscount,
 } from '../lib'
 import type {
@@ -64,6 +67,10 @@ interface RechargeFormCardProps {
   topupAmount: number
   onTopupAmountChange: (amount: number) => void
   paymentAmount: number
+  /** Bonus the server quoted for the amount in the field; 0 when there is none */
+  paymentBonusRate?: number
+  paymentBonusAmount?: number
+  paymentCreditAmount?: number
   calculating: boolean
   onPaymentMethodSelect: (method: PaymentMethod) => void
   paymentLoading: string | null
@@ -94,6 +101,9 @@ export function RechargeFormCard({
   topupAmount,
   onTopupAmountChange,
   paymentAmount,
+  paymentBonusRate = 0,
+  paymentBonusAmount = 0,
+  paymentCreditAmount = 0,
   calculating,
   onPaymentMethodSelect,
   paymentLoading,
@@ -289,6 +299,13 @@ export function RechargeFormCard({
                       const discountParts = hasDiscount
                         ? getDiscountParts(discount)
                         : null
+                      // Bonus mode: the price stays the face value and the
+                      // card shows what lands in the wallet instead.
+                      const bonusRate = effectiveBonus(
+                        preset.value,
+                        topupInfo?.bonus,
+                        topupInfo?.tier
+                      )
                       return (
                         <Button
                           key={preset.value}
@@ -310,6 +327,13 @@ export function RechargeFormCard({
                                 {t('{{percent}}% OFF', discountParts)}
                               </div>
                             )}
+                            {bonusRate > 0 && (
+                              <div className='text-xs font-medium text-green-600'>
+                                {t('+{{percent}}% credit', {
+                                  percent: bonusPercent(bonusRate),
+                                })}
+                              </div>
+                            )}
                           </div>
                           <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
                             {t('Pay {{amount}}', {
@@ -324,6 +348,17 @@ export function RechargeFormCard({
                                 })}
                               </span>
                             )}
+                            {bonusRate > 0 && (
+                              <span className='text-green-600'>
+                                {' '}
+                                •{' '}
+                                {t('Get {{amount}}', {
+                                  amount: formatCurrency(
+                                    displayValue * (1 + bonusRate)
+                                  ),
+                                })}
+                              </span>
+                            )}
                           </div>
                         </Button>
                       )
@@ -331,6 +366,30 @@ export function RechargeFormCard({
                   </div>
                 </div>
               )}
+
+              {bonusRanges(topupInfo?.bonus).length > 0 ? (
+                <p
+                  data-testid='topup-bonus-ranges'
+                  className='text-muted-foreground text-xs leading-5'
+                >
+                  {t('Bonus by top-up amount: {{ranges}}', {
+                    ranges: bonusRanges(topupInfo?.bonus)
+                      .map((range) =>
+                        range.to === undefined
+                          ? t('{{from}} and above +{{percent}}%', {
+                              from: formatNumber(range.from * usdExchangeRate),
+                              percent: bonusPercent(range.rate),
+                            })
+                          : t('{{from}}–{{to}} +{{percent}}%', {
+                              from: formatNumber(range.from * usdExchangeRate),
+                              to: formatNumber(range.to * usdExchangeRate),
+                              percent: bonusPercent(range.rate),
+                            })
+                      )
+                      .join(' · '),
+                  })}
+                </p>
+              ) : null}
 
               <div className='space-y-2.5 sm:space-y-3'>
                 <Label
@@ -362,6 +421,25 @@ export function RechargeFormCard({
                     )}
                   </div>
                 </div>
+                {paymentBonusAmount > 0 && !calculating ? (
+                  <p
+                    data-testid='topup-bonus-quote'
+                    className='text-xs font-medium text-green-600'
+                  >
+                    {t(
+                      'Bonus {{amount}} ({{percent}}%), {{credited}} credited in total',
+                      {
+                        amount: formatCurrency(
+                          paymentBonusAmount * usdExchangeRate
+                        ),
+                        percent: bonusPercent(paymentBonusRate),
+                        credited: formatCurrency(
+                          paymentCreditAmount * usdExchangeRate
+                        ),
+                      }
+                    )}
+                  </p>
+                ) : null}
               </div>
 
               <div className='space-y-2.5 sm:space-y-3'>

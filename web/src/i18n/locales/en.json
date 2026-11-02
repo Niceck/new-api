@@ -5389,6 +5389,20 @@
     "Highest level reached": "Highest level reached",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead",
     "Progress to VIP{{level}}": "Progress to VIP{{level}}",
-    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Member level is temporarily unavailable; the amount to pay is still worked out by the server"
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Member level is temporarily unavailable; the amount to pay is still worked out by the server",
+    "+{{percent}}% credit": "+{{percent}}% credit",
+    "Get {{amount}}": "Get {{amount}}",
+    "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total": "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total",
+    "Bonus credit": "Bonus credit",
+    "Total credited": "Total credited",
+    "Every top-up gets {{percent}}% extra credit": "Every top-up gets {{percent}}% extra credit",
+    "Top up {{amount}} in total to unlock permanent bonus credit": "Top up {{amount}} in total to unlock permanent bonus credit",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)": "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)",
+    "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead": "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead",
+    "Includes {{amount}} bonus credit": "Includes {{amount}} bonus credit",
+    "Credited in full: {{amount}}": "Credited in full: {{amount}}",
+    "Bonus by top-up amount: {{ranges}}": "Bonus by top-up amount: {{ranges}}",
+    "{{from}}–{{to}} +{{percent}}%": "{{from}}–{{to}} +{{percent}}%",
+    "{{from}} and above +{{percent}}%": "{{from}} and above +{{percent}}%"
   }
 }

@@ -5390,6 +5390,20 @@
     "Highest level reached": "Đã đạt hạng cao nhất",
     "Your level discount applies to every top-up; when a single-order discount is better, you get that one instead": "Ưu đãi theo hạng áp dụng cho mọi lần nạp; nếu ưu đãi theo mức nạp tốt hơn thì áp dụng mức đó, không cộng dồn",
     "Progress to VIP{{level}}": "Tiến độ lên VIP{{level}}",
-    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Hạng thành viên tạm thời không khả dụng; số tiền cần thanh toán vẫn do máy chủ tính"
+    "Member level is temporarily unavailable; the amount to pay is still worked out by the server": "Hạng thành viên tạm thời không khả dụng; số tiền cần thanh toán vẫn do máy chủ tính",
+    "+{{percent}}% credit": "Tặng {{percent}}%",
+    "Get {{amount}}": "Nhận {{amount}}",
+    "Bonus {{amount}} ({{percent}}%), {{credited}} credited in total": "Tặng {{amount}} ({{percent}}%), tổng nhận {{credited}}",
+    "Bonus credit": "Hạn mức tặng thêm",
+    "Total credited": "Tổng nhận",
+    "Every top-up gets {{percent}}% extra credit": "Mỗi lần nạp được tặng thêm {{percent}}%",
+    "Top up {{amount}} in total to unlock permanent bonus credit": "Nạp tổng cộng {{amount}} để được tặng thêm vĩnh viễn",
+    "Top up {{amount}} more to reach VIP{{level}} ({{percent}}% extra credit)": "Nạp thêm {{amount}} để lên VIP{{level}} (tặng thêm {{percent}}%)",
+    "Your level bonus applies to every top-up; when a single-order bonus is higher, you get that one instead": "Ưu đãi hạng áp dụng cho mọi lần nạp; nếu ưu đãi theo số tiền cao hơn thì áp dụng ưu đãi đó, không cộng dồn",
+    "Includes {{amount}} bonus credit": "Gồm {{amount}} được tặng",
+    "Credited in full: {{amount}}": "Nhận khi thanh toán đủ: {{amount}}",
+    "Bonus by top-up amount: {{ranges}}": "Tặng theo số tiền nạp: {{ranges}}",
+    "{{from}}–{{to}} +{{percent}}%": "{{from}}–{{to}}: tặng {{percent}}%",
+    "{{from}} and above +{{percent}}%": "Từ {{from}} trở lên: tặng {{percent}}%"
   }
 }
